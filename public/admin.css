@@ -230,3 +230,16 @@ h1, h2 { font-family: Fraunces, serif; }
 .role { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; }
 .role.manager { background: rgba(233,163,91,.15); color: var(--accent); }
 .role.waiter { background: rgba(106,167,232,.15); color: var(--prep); }
+
+/* ---------- Allergènes et mentions légales ---------- */
+.ed-resto .wide { grid-column: 1 / -1; }
+.ed-legal summary { cursor: pointer; display: flex; gap: 10px; align-items: center; }
+.ed-legal summary .warn { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: rgba(232,106,106,.15); color: var(--danger); }
+.ed-legal summary .ok { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: rgba(127,200,160,.15); color: var(--ready); }
+.ed-help { color: var(--muted); font-size: 13px; margin: 10px 0 12px; }
+.ed-grid.legal { grid-template-columns: 1fr 1fr; }
+.ed-grid.legal .wide { grid-column: 1 / -1; }
+@media (max-width: 640px) { .ed-grid.legal { grid-template-columns: 1fr; } }
+.ed-allergens .ed-tag.al.on { background: rgba(232,106,106,.14); border-color: var(--danger); color: var(--text); }
+.ed-allergens .ed-tag.none.on { background: rgba(127,200,160,.15); border-color: var(--ready); color: var(--ready); }
+.al-missing { color: var(--accent); }

@@ -50,7 +50,42 @@
     $('#splashName').textContent = data.restaurant.name;
     $('#restoName').textContent = data.restaurant.name;
     $('#restoTagline').textContent = data.restaurant.tagline || '';
+    $('#priceNote').textContent = data.restaurant.priceNote || '';
+    $('#priceNote').hidden = !data.restaurant.priceNote;
   }
+
+  // ---------- Allergènes ----------
+  const ALLERGEN = new Map(window.ALLERGENS.map((a) => [a.id, a]));
+  function allergensHtml(it) {
+    const list = it.allergens || [];
+    if (list.includes('aucun')) return '<div class="al-title">Allergènes</div><p class="al-none">Aucun des 14 allergènes majeurs.</p>';
+    if (!list.length) return '<div class="al-title">Allergènes</div><p class="al-unknown">Non renseignés : demandez au personnel avant de commander.</p>';
+    return `<div class="al-title">Contient</div><div class="al-list">${list.map((id) => ALLERGEN.get(id))
+      .filter(Boolean).map((a) => `<span class="al"><span aria-hidden="true">${a.icon}</span>${esc(a.label)}</span>`).join('')}</div>`;
+  }
+
+  // ---------- Mentions légales ----------
+  function renderLegal() {
+    const l = data.restaurant.legal || {};
+    const row = (label, v) => (v ? `<div class="lg-row"><dt>${label}</dt><dd>${esc(v)}</dd></div>` : '');
+    const rows = [
+      row('Établissement', l.company || data.restaurant.name), row('Adresse', l.address), row('SIRET', l.siret),
+      row('Téléphone', l.phone), row('E-mail', l.email), row('Responsable de la publication', l.publisher), row('Hébergement', l.host),
+    ].join('');
+    $('#legalBody').innerHTML = `
+      <h3 class="lg-h">Allergènes</h3>
+      <p class="lg-p">Les 14 allergènes majeurs (règlement UE n° 1169/2011) sont indiqués sur la fiche de chaque plat.
+        Ces informations sont fournies par l'établissement. En cas d'allergie ou d'intolérance, signalez-le au personnel avant de commander.</p>
+      <div class="al-list legend">${window.ALLERGENS.map((a) => `<span class="al"><span aria-hidden="true">${a.icon}</span>${esc(a.full)}</span>`).join('')}</div>
+      ${data.restaurant.priceNote ? `<h3 class="lg-h">Prix</h3><p class="lg-p">${esc(data.restaurant.priceNote)}. Prix en euros, toutes taxes comprises.</p>` : ''}
+      <h3 class="lg-h">Mentions légales</h3>
+      <dl class="lg-list">${rows}</dl>
+      <h3 class="lg-h">Données personnelles</h3>
+      <p class="lg-p">Ce service ne demande ni nom, ni e-mail, ni téléphone. Votre panier et le suivi de vos commandes sont gardés
+        uniquement sur votre téléphone. Les commandes (plats, table, heure) sont conservées 90 jours pour la gestion de l'établissement.</p>`;
+  }
+  $('#legalBtn').addEventListener('click', () => { renderLegal(); openSheet('#legalSheet'); });
+  $('#legalClose').addEventListener('click', () => closeSheets());
 
   async function loadOrders() {
     const r = await fetch(`/api/table/${token}/orders`);
@@ -174,6 +209,7 @@
     $('#itemName').textContent = current.name;
     $('#itemDesc').textContent = current.description;
     $('#itemTags').innerHTML = tagsHtml(current);
+    $('#itemAllergens').innerHTML = allergensHtml(current);
     $('#itemNote').value = '';
     updateItemSheet();
     openSheet('#itemSheet');

@@ -341,10 +341,27 @@
       <div class="ed-card ed-resto">
         <label class="ed-field"><span>Nom du restaurant</span><input id="edName" data-r="name" maxlength="60" value="${esc(r.name)}" /></label>
         <label class="ed-field"><span>Slogan (affiché sous le nom)</span><input id="edTagline" data-r="tagline" maxlength="120" value="${esc(r.tagline)}" /></label>
+        <label class="ed-field wide"><span>Mention sur les prix (bas de la carte, vide = aucune)</span><input id="edPriceNote" data-r="priceNote" maxlength="120" value="${esc(r.priceNote ?? '')}" /></label>
       </div>
+      <details class="ed-card ed-legal" ${(legalOpen ?? legalMissing()) ? 'open' : ''}>
+        <summary><b>Mentions légales</b> <span class="${legalMissing() ? 'warn' : 'ok'}">${legalMissing() ? 'À compléter' : 'Complètes'}</span></summary>
+        <p class="ed-help">Affichées aux clients via le lien « Allergènes et mentions légales » en bas de la carte. Obligatoires pour un site professionnel.</p>
+        <div class="ed-grid legal">
+          ${[['company', "Nom de l'établissement / société", 'SARL Le Comptoir'], ['siret', 'SIRET', '123 456 789 00012'],
+             ['address', 'Adresse', '12 rue de la Paix, 75002 Paris'], ['phone', 'Téléphone', '01 23 45 67 89'],
+             ['email', 'E-mail de contact', 'contact@monresto.fr'], ['publisher', 'Responsable de la publication', 'Prénom Nom, gérant'],
+             ['host', 'Hébergeur', '']].map(([k, label, ph]) =>
+            `<label class="ed-field${k === 'address' || k === 'host' ? ' wide' : ''}"><span>${label}</span><input data-legal="${k}" maxlength="200" placeholder="${esc(ph)}" value="${esc(r.legal?.[k] || '')}" /></label>`).join('')}
+        </div>
+      </details>
       ${draft.categories.map((c, ci) => catHtml(c, ci)).join('')}
       <button class="btn ghost ed-add-cat" data-act="cat-add">+ Ajouter une catégorie</button>`;
   }
+
+  let legalOpen = null; // garde la section ouverte/fermée entre deux affichages
+  $('#menuList').addEventListener('toggle', (e) => { if (e.target.classList?.contains('ed-legal')) legalOpen = e.target.open; }, true);
+  const legalMissing = () => ['company', 'address', 'siret', 'publisher'].some((k) => !String(draft.restaurant.legal?.[k] || '').trim());
+  const ALLERGEN_IDS = new Set(window.ALLERGENS.map((a) => a.id));
 
   function catHtml(c, ci) {
     const last = ci === draft.categories.length - 1;
@@ -373,7 +390,7 @@
     return `<div class="ed-item${open ? ' open' : ''}${on ? '' : ' off'}" data-ci="${ci}" data-ii="${ii}">
       <div class="ed-row">
         <span class="ed-thumb">${thumb(it)}</span>
-        <div class="ed-sum"><b data-sum="name">${esc(it.name) || '<i>Sans nom</i>'}</b><small data-sum="price">${Number.isFinite(it.price) ? fmt.format(it.price / 100) : 'Prix à corriger'}</small></div>
+        <div class="ed-sum"><b data-sum="name">${esc(it.name) || '<i>Sans nom</i>'}</b><small><span data-sum="price">${Number.isFinite(it.price) ? fmt.format(it.price / 100) : 'Prix à corriger'}</span>${(it.allergens || []).length ? '' : ' · <span class="al-missing" data-sum="al">allergènes à renseigner</span>'}</small></div>
         ${saved ? `<span class="st">${on ? 'Disponible' : 'Épuisé'}</span><button class="switch${on ? ' on' : ''}" data-act="avail" role="switch" aria-checked="${on}" aria-label="${esc(it.name)} disponible"></button>`
                 : '<span class="st new">Nouveau</span>'}
         <button class="ed-icon-btn" data-act="item-up" ${ii ? '' : 'disabled'} aria-label="Monter">↑</button>
@@ -407,6 +424,13 @@
         <div class="ed-tags">${TAGS.map((t) => `<button class="ed-tag${(it.tags || []).includes(t) ? ' on' : ''}" data-act="tag" data-tag="${esc(t)}" aria-pressed="${(it.tags || []).includes(t)}">${esc(t)}</button>`).join('')}</div>
         <input data-f="customTags" placeholder="Autres étiquettes, séparées par des virgules" value="${esc(custom.join(', '))}" />
       </div>
+      <div class="ed-field"><span>Allergènes (obligatoire) · cochez tout ce que contient le plat</span>
+        <div class="ed-tags ed-allergens">
+          ${window.ALLERGENS.map((a) => { const on = (it.allergens || []).includes(a.id);
+            return `<button class="ed-tag al${on ? ' on' : ''}" data-act="allergen" data-al="${a.id}" aria-pressed="${on}" title="${esc(a.full)}">${a.icon} ${esc(a.label)}</button>`; }).join('')}
+          <button class="ed-tag none${(it.allergens || []).includes('aucun') ? ' on' : ''}" data-act="allergen" data-al="aucun" aria-pressed="${(it.allergens || []).includes('aucun')}">✓ Aucun des 14</button>
+        </div>
+      </div>
       <div class="ed-form-foot">
         ${asking ? `<span class="ed-confirm inline">Supprimer ce plat ? <button class="btn sm danger-fill" data-act="item-del-yes">Oui</button><button class="btn sm ghost" data-act="cancel-confirm">Non</button></span>`
                  : '<button class="btn sm ghost danger" data-act="item-del">Supprimer ce plat</button>'}
@@ -428,6 +452,12 @@
   $('#menuList').addEventListener('input', (e) => {
     const el = e.target;
     if (el.dataset.r) { draft.restaurant[el.dataset.r] = el.value; return setDirty(true); }
+    if (el.dataset.legal) {
+      draft.restaurant.legal = { ...(draft.restaurant.legal || {}), [el.dataset.legal]: el.value };
+      const badge = $('.ed-legal summary span');
+      badge.className = legalMissing() ? 'warn' : 'ok'; badge.textContent = legalMissing() ? 'À compléter' : 'Complètes';
+      return setDirty(true);
+    }
     const { cat, item, itemBox } = ref(el);
     if (el.dataset.c) { cat[el.dataset.c] = el.value; return setDirty(true); }
     if (!item || !el.dataset.f || el.dataset.f === 'category') return;
@@ -487,6 +517,19 @@
       catch (err) { toast(err.message); }
       return;
     }
+    if (act === 'allergen') {
+      const id = b.dataset.al;
+      let list = (item.allergens || []).filter((x) => x !== 'aucun');
+      if (id === 'aucun') list = (item.allergens || []).includes('aucun') ? [] : ['aucun'];
+      else list = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+      item.allergens = list;
+      b.closest('.ed-allergens').querySelectorAll('[data-al]').forEach((x) => {
+        const on = list.includes(x.dataset.al); x.classList.toggle('on', on); x.setAttribute('aria-pressed', on);
+      });
+      const warn = b.closest('.ed-item').querySelector('[data-sum="al"]');
+      if (list.length && warn) warn.previousSibling.remove(), warn.remove();
+      return setDirty(true);
+    }
     if (act === 'tag') {
       const t = b.dataset.tag;
       item.tags = (item.tags || []).includes(t) ? item.tags.filter((x) => x !== t) : [...(item.tags || []), t];
@@ -501,7 +544,7 @@
       'cat-del-yes': () => { draft.categories.splice(ci, 1); confirmKey = null; },
       'cancel-confirm': () => { confirmKey = null; return 'nodirty'; },
       'item-add': () => {
-        const it = { id: '', name: 'Nouveau plat', description: '', price: 0, emoji: '🍽', tags: [], image: null, available: true };
+        const it = { id: '', name: 'Nouveau plat', description: '', price: 0, emoji: '🍽', tags: [], image: null, available: true, allergens: [] };
         cat.items.push(it); openItem = it;
       },
       'item-up': () => swap(cat.items, ii, ii - 1),

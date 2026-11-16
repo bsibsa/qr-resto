@@ -106,7 +106,7 @@ app.get('/api/table/:token', (req, res) => {
   if (!table) return res.status(404).json({ error: 'Table inconnue' });
   res.json({
     table: { number: table.number },
-    restaurant: menu.restaurant,
+    restaurant: publicRestaurant(),
     categories: menu.categories,
   });
 });
@@ -339,13 +339,25 @@ app.delete('/api/admin/tables/:id', requireManager, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/admin/menu', requireManager, (_req, res) => res.json(menu));
+app.get('/api/admin/menu', requireManager, (_req, res) => res.json({ ...menu, restaurant: publicRestaurant() }));
 
 // Enregistre la carte complète envoyée par l'éditeur (tout est revérifié ici)
 function slug(text) {
   return String(text).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 }
+// Les 14 allergènes à déclaration obligatoire (règlement UE n° 1169/2011, annexe II)
+const ALLERGENS = ['gluten', 'crustaces', 'oeufs', 'poissons', 'arachides', 'soja', 'lait', 'fruits-a-coque',
+  'celeri', 'moutarde', 'sesame', 'sulfites', 'lupin', 'mollusques'];
+const LEGAL_FIELDS = ['company', 'address', 'siret', 'phone', 'email', 'publisher', 'host'];
+const DEFAULT_PRICE_NOTE = 'Prix nets, service compris';
+const DEFAULT_HOST = 'Render Services, Inc. (render.com) · données : Neon (neon.tech)';
+const publicRestaurant = () => ({
+  ...menu.restaurant,
+  priceNote: menu.restaurant.priceNote ?? DEFAULT_PRICE_NOTE,
+  legal: { ...Object.fromEntries(LEGAL_FIELDS.map((k) => [k, ''])), host: DEFAULT_HOST, ...(menu.restaurant.legal || {}) },
+});
+
 function cleanMenu(input) {
   const str = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
   const current = new Map(allItems().map((i) => [i.id, i]));
@@ -362,6 +374,8 @@ function cleanMenu(input) {
       name: str(input?.restaurant?.name, 60) || menu.restaurant.name,
       tagline: str(input?.restaurant?.tagline, 120),
       currency: menu.restaurant.currency || 'EUR',
+      priceNote: input?.restaurant?.priceNote === undefined ? DEFAULT_PRICE_NOTE : str(input.restaurant.priceNote, 120),
+      legal: Object.fromEntries(LEGAL_FIELDS.map((k) => [k, str(input?.restaurant?.legal?.[k], 200)])),
     },
     categories: cats.map((c) => ({
       id: uniqueId(c?.id, c?.name),
@@ -380,6 +394,11 @@ function cleanMenu(input) {
             emoji: str(it.emoji, 8) || '🍽',
             tags: (Array.isArray(it.tags) ? it.tags : []).map((t) => str(t, 24)).filter(Boolean).slice(0, 6),
             image: IMAGE_ID.test(it.image || '') ? it.image : null,
+            // [] = non renseigné ; ['aucun'] = aucun des 14 allergènes
+            allergens: (() => {
+              const list = [...new Set((Array.isArray(it.allergens) ? it.allergens : []).filter((a) => ALLERGENS.includes(a)))];
+              return list.length ? list : (Array.isArray(it.allergens) && it.allergens.includes('aucun') ? ['aucun'] : []);
+            })(),
             // la disponibilité se gère avec l'interrupteur « épuisé », pas depuis l'éditeur
             available: current.has(id) ? current.get(id).available !== false : true,
           };
@@ -397,8 +416,9 @@ app.put('/api/admin/menu', requireManager, async (req, res) => {
   // supprime les photos qui ne servent plus
   const kept = new Set(allItems().map((i) => i.image).filter(Boolean));
   storage.deleteImages([...before].filter((id) => !kept.has(id))).catch((e) => console.error('[db] nettoyage images :', e.message));
-  io.emit('menu:update', menu);
-  res.json(menu);
+  const out = { ...menu, restaurant: publicRestaurant() };
+  io.emit('menu:update', out);
+  res.json(out);
 });
 
 app.patch('/api/admin/menu/:id', requireManager, async (req, res) => {

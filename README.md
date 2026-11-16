@@ -59,6 +59,14 @@ Onglet **Menu** de l'interface restaurant : nom et slogan, catégories, plats (p
 étiquettes, photo). « Enregistrer » publie la carte instantanément sur les téléphones des clients.
 Les photos sont réduites dans le navigateur (1000 px, JPEG) puis stockées en base (table `images`).
 
+## Allergènes et mentions légales
+
+- Chaque plat porte les 14 allergènes à déclaration obligatoire (règlement UE n° 1169/2011),
+  cochés dans l'éditeur. Côté client, ils s'affichent sur la fiche du plat ; un plat non renseigné
+  affiche « Non renseignés : demandez au personnel ».
+- Mentions légales (établissement, adresse, SIRET, responsable de la publication, hébergeur) et
+  mention sur les prix se remplissent dans l'onglet Menu ; le client y accède en bas de la carte.
+
 ## Données
 
 Avec `DATABASE_URL`, le menu, les tables et 90 jours de commandes sont enregistrés dans PostgreSQL

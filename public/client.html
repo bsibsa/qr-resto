@@ -43,7 +43,11 @@
 
   <main id="menu" class="menu"></main>
 
-  <footer class="foot">Commandez depuis votre table · le personnel vous apporte tout</footer>
+  <footer class="foot">
+    <p class="price-note" id="priceNote"></p>
+    <p>Commandez depuis votre table · le personnel vous apporte tout</p>
+    <button class="foot-link" id="legalBtn">Allergènes et mentions légales</button>
+  </footer>
 
   <!-- Barre panier -->
   <button class="cart-bar" id="cartBar" hidden>
@@ -61,6 +65,7 @@
     <h2 class="sheet-title" id="itemName"></h2>
     <p class="sheet-desc" id="itemDesc"></p>
     <div class="tags" id="itemTags"></div>
+    <div class="allergens" id="itemAllergens"></div>
     <label class="field">
       <span>Une précision ?</span>
       <input id="itemNote" maxlength="140" placeholder="Ex. sans oignons, cuisson saignante…" />
@@ -97,6 +102,13 @@
     <button class="btn ghost block" id="trackClose">Continuer à parcourir le menu</button>
   </section>
 
+  <section class="sheet tall" id="legalSheet" aria-modal="true" role="dialog" aria-labelledby="legalTitle">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title" id="legalTitle">Informations</h2>
+    <div id="legalBody"></div>
+    <button class="btn ghost block" id="legalClose">Retour à la carte</button>
+  </section>
+
   <section class="sheet" id="callSheet" aria-modal="true" role="dialog">
     <div class="sheet-handle"></div>
     <h2 class="sheet-title">Besoin de quelque chose ?</h2>
@@ -109,6 +121,7 @@
   <div class="toast" id="toast"></div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/allergens.js"></script>
   <script src="/client.js"></script>
 </body>
 </html>
