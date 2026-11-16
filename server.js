@@ -63,7 +63,27 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.json({ limit: '100kb' }));
+// Photos des plats (envoyées déjà réduites par le navigateur)
+const IMAGE_TYPES = { 'image/jpeg': 1, 'image/webp': 1, 'image/png': 1 };
+const IMAGE_ID = /^[0-9a-f]{32}$/;
+app.post('/api/admin/images', (req, res, next) => requireAdmin(req, res, next),
+  express.raw({ type: Object.keys(IMAGE_TYPES), limit: '1mb' }), async (req, res) => {
+    const mime = (req.get('content-type') || '').split(';')[0];
+    if (!IMAGE_TYPES[mime] || !Buffer.isBuffer(req.body) || req.body.length < 100) return res.status(400).json({ error: 'Image invalide' });
+    const id = crypto.randomBytes(16).toString('hex');
+    try { await storage.putImage(id, mime, req.body); } catch (e) { return dbError(res, e); }
+    res.json({ id });
+  });
+app.get('/img/:id', async (req, res) => {
+  if (!IMAGE_ID.test(req.params.id)) return res.sendStatus(404);
+  try {
+    const img = await storage.getImage(req.params.id);
+    if (!img) return res.sendStatus(404);
+    res.set({ 'Content-Type': img.mime, 'Cache-Control': 'public, max-age=31536000, immutable' }).send(img.data);
+  } catch (e) { console.error('[db] lecture image :', e.message); res.sendStatus(503); }
+});
+
+app.use(express.json({ limit: '300kb' }));
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 app.get('/', (_req, res) => res.redirect('/admin'));
@@ -220,6 +240,66 @@ app.delete('/api/admin/tables/:id', requireAdmin, async (req, res) => {
 });
 
 app.get('/api/admin/menu', requireAdmin, (_req, res) => res.json(menu));
+
+// Enregistre la carte complète envoyée par l'éditeur (tout est revérifié ici)
+function slug(text) {
+  return String(text).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+function cleanMenu(input) {
+  const str = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const current = new Map(allItems().map((i) => [i.id, i]));
+  const used = new Set();
+  const uniqueId = (wanted, label) => {
+    let id = /^[a-z0-9-]{1,60}$/.test(wanted || '') ? wanted : (slug(label) || 'element');
+    while (used.has(id)) id = `${slug(label) || 'element'}-${crypto.randomBytes(2).toString('hex')}`;
+    used.add(id);
+    return id;
+  };
+  const cats = Array.isArray(input?.categories) ? input.categories.slice(0, 30) : [];
+  return {
+    restaurant: {
+      name: str(input?.restaurant?.name, 60) || menu.restaurant.name,
+      tagline: str(input?.restaurant?.tagline, 120),
+      currency: menu.restaurant.currency || 'EUR',
+    },
+    categories: cats.map((c) => ({
+      id: uniqueId(c?.id, c?.name),
+      name: str(c?.name, 40) || 'Sans nom',
+      icon: str(c?.icon, 8),
+      items: (Array.isArray(c?.items) ? c.items.slice(0, 150) : [])
+        .filter((it) => str(it?.name, 80))
+        .map((it) => {
+          const id = uniqueId(it.id, it.name);
+          const price = Math.round(Number(it.price));
+          return {
+            id,
+            name: str(it.name, 80),
+            description: str(it.description, 300),
+            price: Number.isFinite(price) ? Math.min(Math.max(price, 0), 1000000) : 0,
+            emoji: str(it.emoji, 8) || '🍽',
+            tags: (Array.isArray(it.tags) ? it.tags : []).map((t) => str(t, 24)).filter(Boolean).slice(0, 6),
+            image: IMAGE_ID.test(it.image || '') ? it.image : null,
+            // la disponibilité se gère avec l'interrupteur « épuisé », pas depuis l'éditeur
+            available: current.has(id) ? current.get(id).available !== false : true,
+          };
+        }),
+    })),
+  };
+}
+app.put('/api/admin/menu', requireAdmin, async (req, res) => {
+  const next = cleanMenu(req.body);
+  const before = new Set(allItems().map((i) => i.image).filter(Boolean));
+  const previous = menu;
+  menu = next;
+  try { await saveMenu(); }
+  catch (e) { menu = previous; return dbError(res, e); }
+  // supprime les photos qui ne servent plus
+  const kept = new Set(allItems().map((i) => i.image).filter(Boolean));
+  storage.deleteImages([...before].filter((id) => !kept.has(id))).catch((e) => console.error('[db] nettoyage images :', e.message));
+  io.emit('menu:update', menu);
+  res.json(menu);
+});
 
 app.patch('/api/admin/menu/:id', requireAdmin, async (req, res) => {
   const item = findItem(req.params.id);

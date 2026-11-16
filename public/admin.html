@@ -67,9 +67,14 @@
     <!-- Menu -->
     <section class="view" id="view-menu" hidden>
       <div class="view-head">
-        <div><h2>Disponibilité du menu</h2><p>Marquez un plat comme épuisé : il disparaît instantanément des commandes clients.</p></div>
+        <div><h2>Carte du restaurant</h2><p>Modifiez vos plats, prix et photos, puis cliquez « Enregistrer » : les clients voient la nouvelle carte aussitôt.<br>L'interrupteur « Disponible / Épuisé » s'applique tout de suite.</p></div>
       </div>
       <div id="menuList"></div>
+      <div class="save-bar" id="saveBar" hidden>
+        <span>Modifications non enregistrées</span>
+        <button class="btn ghost" id="cancelEdit">Annuler</button>
+        <button class="btn primary" id="saveMenu">Enregistrer</button>
+      </div>
     </section>
   </div>
 

@@ -26,14 +26,11 @@
     if (!res.ok) { location.href = '/404.html'; return; }
     data = await res.json();
     fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: data.restaurant.currency });
-    data.categories.forEach((c) => c.items.forEach((i) => items.set(i.id, i)));
+    indexItems();
     cart = cart.filter((l) => items.has(l.id));
 
-    document.title = `${data.restaurant.name} · Table ${data.table.number}`;
-    $('#splashName').textContent = data.restaurant.name;
+    applyHeader();
     $('#splashTable').textContent = `Table ${data.table.number}`;
-    $('#restoName').textContent = data.restaurant.name;
-    $('#restoTagline').textContent = data.restaurant.tagline;
     $('#tableBadge').textContent = `Table ${data.table.number}`;
 
     renderMenu();
@@ -42,6 +39,17 @@
 
     await loadOrders();
     connectSocket();
+  }
+
+  function indexItems() {
+    items.clear();
+    data.categories.forEach((c) => c.items.forEach((i) => items.set(i.id, i)));
+  }
+  function applyHeader() {
+    document.title = `${data.restaurant.name} · Table ${data.table.number}`;
+    $('#splashName').textContent = data.restaurant.name;
+    $('#restoName').textContent = data.restaurant.name;
+    $('#restoTagline').textContent = data.restaurant.tagline || '';
   }
 
   async function loadOrders() {
@@ -71,6 +79,20 @@
       updateOrdersBtn();
       if ($('#trackSheet').classList.contains('show')) renderTrack();
     });
+    // Le restaurant a modifié sa carte : on la redessine sans perdre le panier
+    socket.on('menu:update', (menu) => {
+      data.restaurant = { ...data.restaurant, ...menu.restaurant };
+      data.categories = menu.categories;
+      indexItems();
+      const removed = cart.filter((l) => !items.has(l.id) || items.get(l.id).available === false);
+      if (removed.length) {
+        cart = cart.filter((l) => !removed.includes(l));
+        toast('La carte a changé : certains plats ont été retirés de votre panier');
+      }
+      applyHeader();
+      renderMenu();
+      renderCart();
+    });
     socket.on('menu:availability', ({ id, available }) => {
       const it = items.get(id);
       if (!it) return;
@@ -85,7 +107,10 @@
   }
 
   // ---------- Menu ----------
+  const thumb = (it) => it.image ? `<img src="/img/${esc(it.image)}" alt="" loading="lazy" />` : esc(it.emoji);
+  let observers = [];
   function renderMenu() {
+    observers.forEach((o) => o.disconnect());
     $('#cats').innerHTML = data.categories.map((c, i) =>
       `<button class="cat${i ? '' : ' active'}" data-target="${esc(c.id)}">${esc(c.icon)} ${esc(c.name)}</button>`).join('');
     $('#menu').innerHTML = data.categories.map((c) => `
@@ -93,7 +118,7 @@
         <h2><span>${esc(c.icon)}</span>${esc(c.name)}</h2>
         ${c.items.map((it) => `
           <article class="item${it.available === false ? ' soldout' : ''}" data-id="${esc(it.id)}">
-            <div class="item-emoji">${esc(it.emoji)}</div>
+            <div class="item-emoji${it.image ? ' has-photo' : ''}">${thumb(it)}</div>
             <div class="item-body">
               <div class="item-name">${esc(it.name)}</div>
               <div class="item-desc">${esc(it.description)}</div>
@@ -117,18 +142,18 @@
       if (e.isIntersecting) setActiveCat(e.target.dataset.cat);
     }), { rootMargin: '-35% 0px -60% 0px' });
     document.querySelectorAll('.section').forEach((s) => spy.observe(s));
-
-    $('#cats').addEventListener('click', (e) => {
-      const b = e.target.closest('.cat');
-      if (b) document.getElementById('cat-' + b.dataset.target).scrollIntoView({ behavior: 'smooth' });
-    });
-    $('#menu').addEventListener('click', (e) => {
-      const card = e.target.closest('.item');
-      if (!card) return;
-      if (e.target.closest('.add')) { addToCart(card.dataset.id, 1, ''); fly(card.querySelector('.item-emoji')); }
-      else openItem(card.dataset.id);
-    });
+    observers = [reveal, spy];
   }
+  $('#cats').addEventListener('click', (e) => {
+    const b = e.target.closest('.cat');
+    if (b) document.getElementById('cat-' + b.dataset.target)?.scrollIntoView({ behavior: 'smooth' });
+  });
+  $('#menu').addEventListener('click', (e) => {
+    const card = e.target.closest('.item');
+    if (!card || !items.has(card.dataset.id)) return;
+    if (e.target.closest('.add')) { addToCart(card.dataset.id, 1, ''); fly(card.querySelector('.item-emoji'), items.get(card.dataset.id).emoji || '🍽'); }
+    else openItem(card.dataset.id);
+  });
   function tagsHtml(it) {
     return (it.tags || []).map((t) => `<span class="tag${t === 'Signature' ? ' sig' : ''}">${esc(t)}</span>`).join('');
   }
@@ -144,7 +169,8 @@
   let current = null, curQty = 1;
   function openItem(id) {
     current = items.get(id); curQty = 1;
-    $('#itemHero').textContent = current.emoji;
+    $('#itemHero').innerHTML = thumb(current);
+    $('#itemHero').classList.toggle('has-photo', !!current.image);
     $('#itemName').textContent = current.name;
     $('#itemDesc').textContent = current.description;
     $('#itemTags').innerHTML = tagsHtml(current);
@@ -163,7 +189,7 @@
   $('#itemAdd').addEventListener('click', () => {
     addToCart(current.id, curQty, $('#itemNote').value.trim());
     closeSheets();
-    setTimeout(() => fly($('#itemHero'), current.emoji), 120);
+    setTimeout(() => fly($('#itemHero'), current.emoji || '🍽'), 120);
   });
 
   // ---------- Panier ----------

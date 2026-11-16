@@ -87,7 +87,16 @@
       chime(true);
       flashTitle(`🙋 Table ${c.table}`);
     });
-    socket.on('menu:availability', () => { if (!$('#view-menu').hidden) loadMenu(); });
+    socket.on('menu:availability', ({ id, available }) => {
+      const it = draft?.categories.flatMap((c) => c.items).find((i) => i.id === id);
+      if (it) { it.available = available; if (!$('#view-menu').hidden && !openItem) renderEditor(); }
+    });
+    socket.on('menu:update', (menu) => {
+      $('#brandName').textContent = menu.restaurant.name;
+      if (!draft) return;
+      if (!dirty) loadMenu(true);
+      else toast('La carte vient d\'être modifiée sur un autre appareil. Enregistrer remplacera ces changements.');
+    });
   }
 
   // ---------- Commandes ----------
@@ -142,7 +151,7 @@
   }
 
   document.addEventListener('click', async (e) => {
-    const b = e.target.closest('[data-act]');
+    const b = e.target.closest('.order [data-act]');
     if (!b) return;
     const id = b.closest('.order').dataset.id;
     const act = b.dataset.act;
@@ -207,31 +216,268 @@
     setTimeout(() => window.print(), 100);
   });
 
-  // ---------- Menu ----------
-  async function loadMenu() {
-    const menu = await api('/api/admin/menu');
-    $('#menuList').innerHTML = menu.categories.map((c) => `
-      <div class="mcat"><h3>${esc(c.icon)} ${esc(c.name)}</h3>
-        ${c.items.map((it) => {
-          const on = it.available !== false;
-          return `<div class="mitem${on ? '' : ' off'}" data-id="${esc(it.id)}">
-            <span class="e">${esc(it.emoji)}</span>
-            <div class="n"><b>${esc(it.name)}</b><small>${fmt.format(it.price / 100)}</small></div>
-            <span class="st">${on ? 'Disponible' : 'Épuisé'}</span>
-            <button class="switch${on ? ' on' : ''}" aria-label="Disponibilité"></button>
-          </div>`;
-        }).join('')}
-      </div>`).join('');
+  // ---------- Éditeur de carte ----------
+  // On modifie une copie (« brouillon ») ; rien n'est envoyé aux clients avant « Enregistrer ».
+  // Seul l'interrupteur Disponible / Épuisé s'applique tout de suite.
+  const TAGS = ['Signature', 'Nouveau', 'Végé', 'Vegan', 'Sans gluten', 'Épicé', 'Sans alcool', 'À partager'];
+  let draft = null;
+  let savedIds = new Set();
+  let dirty = false;
+  let openItem = null;      // plat dont le formulaire est ouvert
+  let confirmKey = null;    // suppression en attente de confirmation
+  let uploading = null;     // plat dont la photo est en cours d'envoi
+
+  const euros = (c) => (c / 100).toFixed(2).replace('.', ',');
+  const parseEuros = (v) => {
+    const n = Number(String(v).replace(/\s|€/g, '').replace(',', '.'));
+    return v !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : NaN;
+  };
+  const thumb = (it) => it.image ? `<img src="/img/${esc(it.image)}" alt="" />` : esc(it.emoji || '🍽');
+
+  function setDirty(v) {
+    dirty = v;
+    $('#saveBar').hidden = !v;
   }
-  $('#menuList').addEventListener('click', async (e) => {
-    const sw = e.target.closest('.switch');
-    if (!sw) return;
-    const row = sw.closest('.mitem');
-    const on = !sw.classList.contains('on');
-    sw.classList.toggle('on', on); row.classList.toggle('off', !on);
-    row.querySelector('.st').textContent = on ? 'Disponible' : 'Épuisé';
-    await api('/api/admin/menu/' + row.dataset.id, { method: 'PATCH', body: { available: on } });
+  window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+  async function loadMenu(force) {
+    if (dirty && !force) return renderEditor();
+    const menu = await api('/api/admin/menu');
+    draft = structuredClone(menu);
+    savedIds = new Set(menu.categories.flatMap((c) => c.items.map((i) => i.id)));
+    openItem = null; confirmKey = null;
+    setDirty(false);
+    renderEditor();
+  }
+
+  function renderEditor() {
+    if (!draft) return;
+    const r = draft.restaurant;
+    $('#menuList').innerHTML = `
+      <div class="ed-card ed-resto">
+        <label class="ed-field"><span>Nom du restaurant</span><input id="edName" data-r="name" maxlength="60" value="${esc(r.name)}" /></label>
+        <label class="ed-field"><span>Slogan (affiché sous le nom)</span><input id="edTagline" data-r="tagline" maxlength="120" value="${esc(r.tagline)}" /></label>
+      </div>
+      ${draft.categories.map((c, ci) => catHtml(c, ci)).join('')}
+      <button class="btn ghost ed-add-cat" data-act="cat-add">+ Ajouter une catégorie</button>`;
+  }
+
+  function catHtml(c, ci) {
+    const last = ci === draft.categories.length - 1;
+    const asking = confirmKey === 'cat:' + ci;
+    return `<section class="ed-cat" data-ci="${ci}">
+      <div class="ed-cat-head">
+        <input class="ed-icon" data-c="icon" maxlength="8" value="${esc(c.icon)}" aria-label="Emoji de la catégorie" />
+        <input class="ed-cat-name" data-c="name" maxlength="40" value="${esc(c.name)}" aria-label="Nom de la catégorie" />
+        <div class="ed-tools">
+          <button class="ed-icon-btn" data-act="cat-up" ${ci ? '' : 'disabled'} title="Monter la catégorie" aria-label="Monter">↑</button>
+          <button class="ed-icon-btn" data-act="cat-down" ${last ? 'disabled' : ''} title="Descendre la catégorie" aria-label="Descendre">↓</button>
+          <button class="btn sm ghost danger" data-act="cat-del">Supprimer</button>
+        </div>
+      </div>
+      ${asking ? `<div class="ed-confirm">Supprimer « ${esc(c.name)} »${c.items.length ? ` et ses ${c.items.length} plat${c.items.length > 1 ? 's' : ''}` : ''} ?
+        <button class="btn sm danger-fill" data-act="cat-del-yes">Oui, supprimer</button><button class="btn sm ghost" data-act="cancel-confirm">Non</button></div>` : ''}
+      <div class="ed-items">${c.items.map((it, ii) => itemHtml(it, ci, ii, c.items.length)).join('') || '<div class="empty">Aucun plat dans cette catégorie.</div>'}</div>
+      <button class="btn sm ghost ed-add-item" data-act="item-add">+ Ajouter un plat</button>
+    </section>`;
+  }
+
+  function itemHtml(it, ci, ii, count) {
+    const on = it.available !== false;
+    const saved = savedIds.has(it.id);
+    const open = openItem === it;
+    return `<div class="ed-item${open ? ' open' : ''}${on ? '' : ' off'}" data-ci="${ci}" data-ii="${ii}">
+      <div class="ed-row">
+        <span class="ed-thumb">${thumb(it)}</span>
+        <div class="ed-sum"><b data-sum="name">${esc(it.name) || '<i>Sans nom</i>'}</b><small data-sum="price">${Number.isFinite(it.price) ? fmt.format(it.price / 100) : 'Prix à corriger'}</small></div>
+        ${saved ? `<span class="st">${on ? 'Disponible' : 'Épuisé'}</span><button class="switch${on ? ' on' : ''}" data-act="avail" role="switch" aria-checked="${on}" aria-label="${esc(it.name)} disponible"></button>`
+                : '<span class="st new">Nouveau</span>'}
+        <button class="ed-icon-btn" data-act="item-up" ${ii ? '' : 'disabled'} aria-label="Monter">↑</button>
+        <button class="ed-icon-btn" data-act="item-down" ${ii === count - 1 ? 'disabled' : ''} aria-label="Descendre">↓</button>
+        <button class="btn sm ${open ? 'next' : 'ghost'}" data-act="item-toggle">${open ? 'Fermer' : 'Modifier'}</button>
+      </div>
+      ${open ? formHtml(it, ci) : ''}
+    </div>`;
+  }
+
+  function formHtml(it, ci) {
+    const custom = (it.tags || []).filter((t) => !TAGS.includes(t));
+    const asking = confirmKey === 'item:' + it.id + ':' + ci;
+    return `<div class="ed-form">
+      <div class="ed-photo">
+        <div class="ed-photo-box">${uploading === it ? '<span class="spinner"></span>' : thumb(it)}</div>
+        <div class="ed-photo-btns">
+          <label class="btn sm ghost">${it.image ? 'Changer la photo' : 'Ajouter une photo'}<input type="file" accept="image/*" data-act="photo" hidden /></label>
+          ${it.image ? '<button class="btn sm ghost danger" data-act="photo-del">Retirer la photo</button>' : ''}
+          <small>Sans photo, l'emoji est affiché.</small>
+        </div>
+      </div>
+      <div class="ed-grid">
+        <label class="ed-field wide"><span>Nom du plat</span><input data-f="name" maxlength="80" value="${esc(it.name)}" /></label>
+        <label class="ed-field"><span>Prix (€)</span><input data-f="price" inputmode="decimal" value="${Number.isFinite(it.price) ? euros(it.price) : ''}" class="${Number.isFinite(it.price) ? '' : 'bad'}" /></label>
+        <label class="ed-field"><span>Emoji</span><input data-f="emoji" maxlength="8" value="${esc(it.emoji)}" /></label>
+        <label class="ed-field wide"><span>Description</span><textarea data-f="description" rows="2" maxlength="300">${esc(it.description)}</textarea></label>
+        <label class="ed-field"><span>Catégorie</span><select data-f="category">${draft.categories.map((c, i) => `<option value="${i}" ${i === ci ? 'selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('')}</select></label>
+      </div>
+      <div class="ed-field"><span>Étiquettes</span>
+        <div class="ed-tags">${TAGS.map((t) => `<button class="ed-tag${(it.tags || []).includes(t) ? ' on' : ''}" data-act="tag" data-tag="${esc(t)}" aria-pressed="${(it.tags || []).includes(t)}">${esc(t)}</button>`).join('')}</div>
+        <input data-f="customTags" placeholder="Autres étiquettes, séparées par des virgules" value="${esc(custom.join(', '))}" />
+      </div>
+      <div class="ed-form-foot">
+        ${asking ? `<span class="ed-confirm inline">Supprimer ce plat ? <button class="btn sm danger-fill" data-act="item-del-yes">Oui</button><button class="btn sm ghost" data-act="cancel-confirm">Non</button></span>`
+                 : '<button class="btn sm ghost danger" data-act="item-del">Supprimer ce plat</button>'}
+      </div>
+    </div>`;
+  }
+
+  const ref = (el) => {
+    const box = el.closest('[data-ci]');
+    const ci = Number(box?.dataset.ci);
+    const itemBox = el.closest('.ed-item');
+    const ii = itemBox ? Number(itemBox.dataset.ii) : null;
+    const cat = draft.categories[ci];
+    return { ci, ii, cat, item: itemBox ? cat.items[ii] : null, itemBox };
+  };
+  const swap = (arr, a, b) => { [arr[a], arr[b]] = [arr[b], arr[a]]; };
+
+  // Saisie : on met à jour le brouillon sans tout redessiner (le curseur reste en place)
+  $('#menuList').addEventListener('input', (e) => {
+    const el = e.target;
+    if (el.dataset.r) { draft.restaurant[el.dataset.r] = el.value; return setDirty(true); }
+    const { cat, item, itemBox } = ref(el);
+    if (el.dataset.c) { cat[el.dataset.c] = el.value; return setDirty(true); }
+    if (!item || !el.dataset.f || el.dataset.f === 'category') return;
+    const f = el.dataset.f;
+    if (f === 'price') {
+      item.price = parseEuros(el.value);
+      el.classList.toggle('bad', !Number.isFinite(item.price));
+      itemBox.querySelector('[data-sum="price"]').textContent = Number.isFinite(item.price) ? fmt.format(item.price / 100) : 'Prix à corriger';
+    } else if (f === 'customTags') {
+      const chosen = (item.tags || []).filter((t) => TAGS.includes(t));
+      item.tags = [...chosen, ...el.value.split(',').map((t) => t.trim()).filter(Boolean)];
+    } else {
+      item[f] = el.value;
+      if (f === 'name') itemBox.querySelector('[data-sum="name"]').textContent = el.value || 'Sans nom';
+      if (f === 'emoji' && !item.image) itemBox.querySelectorAll('.ed-thumb, .ed-photo-box').forEach((b) => { b.textContent = el.value || '🍽'; });
+    }
+    setDirty(true);
   });
+
+  $('#menuList').addEventListener('change', async (e) => {
+    const el = e.target;
+    const { ci, ii, item } = ref(el);
+    if (el.dataset.f === 'category') { // déplacer le plat
+      const to = Number(el.value);
+      draft.categories[ci].items.splice(ii, 1);
+      draft.categories[to].items.push(item);
+      setDirty(true); renderEditor();
+      toast(`Plat déplacé dans « ${draft.categories[to].name} »`);
+    }
+    if (el.dataset.act === 'photo' && el.files[0]) {
+      uploading = item; renderEditor();
+      try {
+        const blob = await shrinkImage(el.files[0]);
+        const r = await fetch('/api/admin/images', { method: 'POST', headers: { 'Content-Type': blob.type, 'x-admin-token': token || '' }, body: blob });
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 401) return logout();
+        if (!r.ok) throw new Error(j.error || 'Envoi impossible');
+        item.image = j.id; setDirty(true);
+      } catch (err) {
+        toast(err.message === 'decode' ? 'Format de photo non pris en charge. Essayez une photo JPEG ou PNG.' : `Photo non envoyée : ${err.message}`);
+      } finally { uploading = null; renderEditor(); }
+    }
+  });
+
+  $('#menuList').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b || b.tagName === 'INPUT') return;
+    const act = b.dataset.act;
+    const { ci, ii, cat, item } = ref(b);
+    if (act === 'avail') { // s'applique tout de suite
+      const on = !b.classList.contains('on');
+      item.available = on;
+      b.classList.toggle('on', on); b.setAttribute('aria-checked', on);
+      b.closest('.ed-item').classList.toggle('off', !on);
+      b.previousElementSibling.textContent = on ? 'Disponible' : 'Épuisé';
+      try { await api('/api/admin/menu/' + item.id, { method: 'PATCH', body: { available: on } }); toast(on ? `« ${item.name} » est de nouveau disponible` : `« ${item.name} » est marqué épuisé`); }
+      catch (err) { toast(err.message); }
+      return;
+    }
+    if (act === 'tag') {
+      const t = b.dataset.tag;
+      item.tags = (item.tags || []).includes(t) ? item.tags.filter((x) => x !== t) : [...(item.tags || []), t];
+      b.classList.toggle('on'); b.setAttribute('aria-pressed', b.classList.contains('on'));
+      return setDirty(true);
+    }
+    const actions = {
+      'cat-add': () => { draft.categories.push({ id: '', name: 'Nouvelle catégorie', icon: '🍽', items: [] }); },
+      'cat-up': () => swap(draft.categories, ci, ci - 1),
+      'cat-down': () => swap(draft.categories, ci, ci + 1),
+      'cat-del': () => { confirmKey = 'cat:' + ci; return 'nodirty'; },
+      'cat-del-yes': () => { draft.categories.splice(ci, 1); confirmKey = null; },
+      'cancel-confirm': () => { confirmKey = null; return 'nodirty'; },
+      'item-add': () => {
+        const it = { id: '', name: 'Nouveau plat', description: '', price: 0, emoji: '🍽', tags: [], image: null, available: true };
+        cat.items.push(it); openItem = it;
+      },
+      'item-up': () => swap(cat.items, ii, ii - 1),
+      'item-down': () => swap(cat.items, ii, ii + 1),
+      'item-toggle': () => { openItem = openItem === item ? null : item; confirmKey = null; return 'nodirty'; },
+      'item-del': () => { confirmKey = 'item:' + item.id + ':' + ci; return 'nodirty'; },
+      'item-del-yes': () => { cat.items.splice(ii, 1); openItem = null; confirmKey = null; },
+      'photo-del': () => { item.image = null; },
+    };
+    if (!actions[act]) return;
+    if (actions[act]() !== 'nodirty') setDirty(true);
+    renderEditor();
+    if (act === 'item-add') $('#menuList .ed-item.open [data-f="name"]')?.select();
+  });
+
+  $('#saveMenu').addEventListener('click', async () => {
+    for (const c of draft.categories) for (const it of c.items) {
+      if (!String(it.name).trim() || !Number.isFinite(it.price)) {
+        openItem = it; renderEditor();
+        $('#menuList .ed-item.open')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return toast(!String(it.name).trim() ? 'Un plat n\'a pas de nom' : `Le prix de « ${it.name} » est invalide (ex. 12,50)`);
+      }
+    }
+    const btn = $('#saveMenu');
+    btn.disabled = true; btn.textContent = 'Enregistrement…';
+    try {
+      const menu = await api('/api/admin/menu', { method: 'PUT', body: draft });
+      if (menu.error) throw new Error(menu.error);
+      draft = structuredClone(menu);
+      savedIds = new Set(menu.categories.flatMap((c) => c.items.map((i) => i.id)));
+      openItem = null; confirmKey = null;
+      setDirty(false); renderEditor();
+      $('#brandName').textContent = menu.restaurant.name;
+      toast('Carte enregistrée : les clients voient déjà la nouvelle version');
+    } catch (err) { toast(err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Enregistrer'; }
+  });
+  $('#cancelEdit').addEventListener('click', () => loadMenu(true));
+
+  // Réduit la photo dans le navigateur (1000 px max, JPEG) avant l'envoi
+  async function shrinkImage(file) {
+    let src;
+    try { src = await createImageBitmap(file); }
+    catch {
+      src = await new Promise((ok, ko) => {
+        const img = new Image();
+        img.onload = () => ok(img); img.onerror = () => ko(new Error('decode'));
+        img.src = URL.createObjectURL(file);
+      });
+    }
+    const w = src.width, h = src.height;
+    if (!w || !h) throw new Error('decode');
+    const k = Math.min(1, 1000 / Math.max(w, h));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(w * k); canvas.height = Math.round(h * k);
+    canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/jpeg', 0.82));
+    if (!blob) throw new Error('decode');
+    return blob;
+  }
 
   // ---------- Son & notifications ----------
   let ctx;

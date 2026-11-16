@@ -30,6 +30,8 @@ function fileStorage(dataDir) {
     fs.renameSync(file(name) + '.tmp', file(name));
   };
   const orders = new Map(read('orders', []).map((o) => [o.id, o]));
+  const imgDir = path.join(dataDir, 'images');
+  const imgFile = (id) => path.join(imgDir, id);
 
   return {
     kind: 'fichiers locaux',
@@ -46,6 +48,18 @@ function fileStorage(dataDir) {
       const snap = [...orders.values()];
       return serial('orders', () => write('orders', snap));
     },
+    async putImage(id, mime, buffer) {
+      fs.mkdirSync(imgDir, { recursive: true });
+      fs.writeFileSync(imgFile(id), buffer);
+      fs.writeFileSync(imgFile(id) + '.type', mime);
+    },
+    async getImage(id) {
+      try { return { mime: fs.readFileSync(imgFile(id) + '.type', 'utf8'), data: fs.readFileSync(imgFile(id)) }; }
+      catch { return null; }
+    },
+    async deleteImages(ids) {
+      for (const id of ids) for (const f of [imgFile(id), imgFile(id) + '.type']) fs.rmSync(f, { force: true });
+    },
   };
 }
 
@@ -53,6 +67,11 @@ function fileStorage(dataDir) {
 async function pgStorage(url, _dataDir) {
   const { Pool } = require('pg');
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || /host=\/|@\//.test(url);
+  try {
+    const u = new URL(url);
+    ['sslmode', 'channel_binding', 'sslrootcert'].forEach((k) => u.searchParams.delete(k));
+    url = u.toString();
+  } catch { /* URL non standard : utilisée telle quelle */ }
   const pool = new Pool({ connectionString: url, ssl: local ? false : { rejectUnauthorized: true }, max: 5, idleTimeoutMillis: 30000 });
   pool.on('error', (e) => console.error('[db] connexion perdue :', e.message));
 
@@ -68,6 +87,12 @@ async function pgStorage(url, _dataDir) {
       data jsonb NOT NULL
     );
     CREATE INDEX IF NOT EXISTS orders_created_at_idx ON orders (created_at);
+    CREATE TABLE IF NOT EXISTS images (
+      id text PRIMARY KEY,
+      mime text NOT NULL,
+      data bytea NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
   `);
   await pool.query(`DELETE FROM orders WHERE created_at < now() - make_interval(days => $1)`, [KEEP_DAYS]);
 
@@ -94,6 +119,16 @@ async function pgStorage(url, _dataDir) {
       return serial('order:' + order.id, () => pool.query(
         `INSERT INTO orders (id, created_at, data) VALUES ($1, $2, $3::jsonb)
          ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`, [order.id, order.createdAt, json]));
+    },
+    async putImage(id, mime, buffer) {
+      await pool.query('INSERT INTO images (id, mime, data) VALUES ($1, $2, $3)', [id, mime, buffer]);
+    },
+    async getImage(id) {
+      const r = await pool.query('SELECT mime, data FROM images WHERE id = $1', [id]);
+      return r.rows[0] || null;
+    },
+    async deleteImages(ids) {
+      if (ids.length) await pool.query('DELETE FROM images WHERE id = ANY($1)', [ids]);
     },
   };
 }

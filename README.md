@@ -42,6 +42,12 @@ précision (« sans oignons »), note pour la cuisine, suivi en direct
 bouton « Encaissée » pour suivre ce qui reste à régler, appels des tables, statistiques du jour, génération et impression des QR,
 plats marqués « épuisés » en un clic (retirés instantanément chez les clients).
 
+## Modifier la carte
+
+Onglet **Menu** de l'interface restaurant : nom et slogan, catégories, plats (prix, description, emoji,
+étiquettes, photo). « Enregistrer » publie la carte instantanément sur les téléphones des clients.
+Les photos sont réduites dans le navigateur (1000 px, JPEG) puis stockées en base (table `images`).
+
 ## Données
 
 Avec `DATABASE_URL`, le menu, les tables et 90 jours de commandes sont enregistrés dans PostgreSQL
