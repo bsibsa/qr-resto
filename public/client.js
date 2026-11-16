@@ -322,8 +322,9 @@
   $('#callSheet').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-reason]');
     if (!b) return;
-    await post(`/api/table/${token}/call`, { reason: b.dataset.reason });
+    const r = await post(`/api/table/${token}/call`, { reason: b.dataset.reason });
     closeSheets();
+    if (r.error) return toast(r.error);
     toast(b.dataset.reason === 'bill' ? '🧾 Un serveur arrive avec l\'addition' : '🙋 Un serveur arrive');
   });
 

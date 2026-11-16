@@ -15,7 +15,7 @@
     <form class="login-box" id="loginForm">
       <div class="logo">◆</div>
       <h1>Espace restaurant</h1>
-      <p>Entrez le code PIN du personnel</p>
+      <p>Entrez votre code personnel</p>
       <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="••••" autofocus />
       <button class="btn primary" type="submit">Se connecter</button>
       <div class="err" id="loginErr"></div>
@@ -27,12 +27,15 @@
       <div class="brand"><span class="logo sm">◆</span><b id="brandName">Restaurant</b></div>
       <nav class="tabs">
         <button class="tab active" data-tab="orders">Commandes <span class="count" id="newCount" hidden>0</span></button>
-        <button class="tab" data-tab="tables">Tables & QR</button>
-        <button class="tab" data-tab="menu">Menu</button>
+        <button class="tab" data-tab="tables" data-manager>Tables & QR</button>
+        <button class="tab" data-tab="menu" data-manager>Menu</button>
+        <button class="tab" data-tab="team" data-manager>Équipe</button>
       </nav>
       <div class="top-right">
         <button class="icon-btn" id="soundBtn" title="Son des notifications">🔔</button>
         <span class="live" id="live"><i></i>En direct</span>
+        <span class="me" id="me"></span>
+        <button class="btn sm ghost" id="logoutBtn">Déconnexion</button>
       </div>
     </header>
 
@@ -74,6 +77,25 @@
         <span>Modifications non enregistrées</span>
         <button class="btn ghost" id="cancelEdit">Annuler</button>
         <button class="btn primary" id="saveMenu">Enregistrer</button>
+      </div>
+    </section>
+
+    <!-- Équipe -->
+    <section class="view" id="view-team" hidden>
+      <div class="view-head">
+        <div><h2>Équipe</h2><p>Chaque membre du personnel a son propre code. Un <b>serveur</b> voit uniquement les commandes ; un <b>gérant</b> a accès à tout.</p></div>
+      </div>
+      <div class="team">
+        <form class="ed-card team-add" id="teamForm" autocomplete="off">
+          <h3>Ajouter une personne</h3>
+          <div class="team-grid">
+            <label class="ed-field"><span>Prénom</span><input id="tName" maxlength="40" placeholder="Léa" required /></label>
+            <label class="ed-field"><span>Rôle</span><select id="tRole"><option value="waiter">Serveur</option><option value="manager">Gérant</option></select></label>
+            <label class="ed-field"><span>Code (4 à 8 chiffres)</span><input id="tPin" inputmode="numeric" maxlength="8" placeholder="ex. 4821" required /></label>
+          </div>
+          <div class="row"><button type="button" class="btn sm ghost" id="tGen">Générer un code</button><button class="btn primary" type="submit">Ajouter</button></div>
+        </form>
+        <div id="teamList"></div>
       </div>
     </section>
   </div>

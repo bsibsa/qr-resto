@@ -17,6 +17,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 let storage;
 let menu;
 let tables;
+let staff = [];  // comptes du personnel : { id, name, role, salt, hash }
 let orders = []; // commandes des dernières 48 h, gardées en mémoire pour l'affichage temps réel
 
 async function loadData() {
@@ -32,6 +33,7 @@ async function loadData() {
     await storage.set('tables', tables);
   }
   orders = await storage.recentOrders(48);
+  staff = (await storage.get('staff')) || [];
 }
 const saveMenu = () => storage.set('menu', menu);
 const saveTables = () => storage.set('tables', tables);
@@ -66,7 +68,7 @@ const io = new Server(server);
 // Photos des plats (envoyées déjà réduites par le navigateur)
 const IMAGE_TYPES = { 'image/jpeg': 1, 'image/webp': 1, 'image/png': 1 };
 const IMAGE_ID = /^[0-9a-f]{32}$/;
-app.post('/api/admin/images', (req, res, next) => requireAdmin(req, res, next),
+app.post('/api/admin/images', (req, res, next) => requireManager(req, res, next),
   express.raw({ type: Object.keys(IMAGE_TYPES), limit: '1mb' }), async (req, res) => {
     const mime = (req.get('content-type') || '').split(';')[0];
     if (!IMAGE_TYPES[mime] || !Buffer.isBuffer(req.body) || req.body.length < 100) return res.status(400).json({ error: 'Image invalide' });
@@ -118,9 +120,27 @@ app.get('/api/table/:token/orders', (req, res) => {
     .map(publicOrder));
 });
 
+// Limite les envois répétés depuis une même table (QR code photographié, blagues…)
+const recentHits = new Map();
+function tooMany(key, max, windowMs) {
+  const now = Date.now();
+  const hits = (recentHits.get(key) || []).filter((t) => now - t < windowMs);
+  if (hits.length >= max) { recentHits.set(key, hits); return true; }
+  hits.push(now);
+  recentHits.set(key, hits);
+  return false;
+}
+setInterval(() => { // ménage
+  const now = Date.now();
+  for (const [k, hits] of recentHits) if (!hits.some((t) => now - t < 3600e3)) recentHits.delete(k);
+}, 600e3).unref();
+
 app.post('/api/table/:token/orders', async (req, res) => {
   const table = tableByToken(req.params.token);
   if (!table) return res.status(404).json({ error: 'Table inconnue' });
+  if (tooMany('order:' + table.id, 5, 10 * 60e3)) {
+    return res.status(429).json({ error: 'Trop de commandes envoyées depuis cette table en peu de temps. Merci de demander au personnel.' });
+  }
   const { items, note = '' } = req.body || {};
   if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Panier vide' });
 
@@ -164,6 +184,9 @@ app.post('/api/table/:token/orders', async (req, res) => {
 app.post('/api/table/:token/call', (req, res) => {
   const table = tableByToken(req.params.token);
   if (!table) return res.status(404).json({ error: 'Table inconnue' });
+  if (tooMany('call:' + table.id, 3, 2 * 60e3)) {
+    return res.status(429).json({ error: 'Le personnel a déjà été prévenu, il arrive.' });
+  }
   const reason = req.body.reason === 'bill' ? 'bill' : 'waiter';
   io.to('staff').emit('call', { id: crypto.randomUUID(), table: table.number, reason, at: new Date().toISOString() });
   res.json({ ok: true });
@@ -175,20 +198,97 @@ function broadcast(order, isNew) {
 }
 
 // ---------- API restaurant ----------
-const adminTokens = new Set();
-const isAdmin = (t) => t && adminTokens.has(t);
-const requireAdmin = (req, res, next) => (isAdmin(req.get('x-admin-token')) ? next() : res.status(401).json({ error: 'Non autorisé' }));
+// Rôles : « manager » (gérant : tout) et « waiter » (serveur : commandes uniquement).
+// Le code ADMIN_PIN défini sur l'hébergeur reste toujours valable comme code du gérant principal.
+const MASTER = { id: 'master', name: 'Gérant principal', role: 'manager' };
+const sessions = new Map(); // jeton -> { staffId, name, role }
+const hashPin = (pin, salt) => crypto.scryptSync(pin, salt, 32, { N: 4096 }).toString('hex');
+const sameText = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+function whoHasPin(pin) {
+  if (sameText(pin, ADMIN_PIN)) return MASTER;
+  return staff.find((m) => sameText(hashPin(pin, m.salt), m.hash)) || null;
+}
+const session = (req) => sessions.get(req.get('x-admin-token') || '');
+const requireAdmin = (req, res, next) => {
+  const s = session(req);
+  if (!s) return res.status(401).json({ error: 'Non autorisé' });
+  req.staff = s;
+  next();
+};
+const requireManager = (req, res, next) => requireAdmin(req, res, () =>
+  req.staff.role === 'manager' ? next() : res.status(403).json({ error: 'Réservé au gérant' }));
+function endSessions(staffId) {
+  for (const [t, s] of sessions) if (s.staffId === staffId) sessions.delete(t);
+  for (const sock of io.of('/').sockets.values()) if (sock.data.staffId === staffId) sock.disconnect(true);
+}
 
 app.post('/api/admin/login', (req, res) => {
   const pin = String(req.body.pin || '');
-  const ok = pin.length === ADMIN_PIN.length && crypto.timingSafeEqual(Buffer.from(pin), Buffer.from(ADMIN_PIN));
-  if (!ok) return res.status(401).json({ error: 'Code incorrect' });
+  const who = /^\d{4,8}$/.test(pin) || pin === ADMIN_PIN ? whoHasPin(pin) : null;
+  if (!who) return res.status(401).json({ error: 'Code incorrect' });
   const token = crypto.randomBytes(24).toString('hex');
-  adminTokens.add(token);
+  sessions.set(token, { staffId: who.id, name: who.name, role: who.role });
   res.json({ token });
 });
 
-app.get('/api/admin/session', requireAdmin, (_req, res) => res.json({ restaurant: menu.restaurant }));
+app.post('/api/admin/logout', (req, res) => { sessions.delete(req.get('x-admin-token') || ''); res.json({ ok: true }); });
+
+app.get('/api/admin/session', requireAdmin, (req, res) => res.json({
+  restaurant: menu.restaurant,
+  me: { name: req.staff.name, role: req.staff.role },
+}));
+
+// ----- Équipe (gérant uniquement)
+const publicStaff = (m) => ({ id: m.id, name: m.name, role: m.role });
+function checkStaffInput(body, existingId) {
+  const name = String(body.name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const role = body.role === 'manager' ? 'manager' : 'waiter';
+  const pin = body.pin == null || body.pin === '' ? null : String(body.pin);
+  if (!name) return { error: 'Indiquez un prénom' };
+  if (pin !== null) {
+    if (!/^\d{4,8}$/.test(pin)) return { error: 'Le code doit faire de 4 à 8 chiffres' };
+    const owner = whoHasPin(pin);
+    if (owner && owner.id !== existingId) return { error: 'Ce code est déjà utilisé, choisissez-en un autre' };
+  }
+  return { name, role, pin };
+}
+const saveStaff = () => storage.set('staff', staff);
+
+app.get('/api/admin/staff', requireManager, (_req, res) => res.json(staff.map(publicStaff)));
+
+app.post('/api/admin/staff', requireManager, async (req, res) => {
+  const v = checkStaffInput(req.body, null);
+  if (v.error) return res.status(400).json(v);
+  if (!v.pin) return res.status(400).json({ error: 'Indiquez un code' });
+  if (staff.length >= 50) return res.status(400).json({ error: 'Nombre maximum de comptes atteint' });
+  const salt = crypto.randomBytes(12).toString('hex');
+  const member = { id: crypto.randomUUID(), name: v.name, role: v.role, salt, hash: hashPin(v.pin, salt) };
+  staff.push(member);
+  try { await saveStaff(); } catch (e) { staff = staff.filter((m) => m !== member); return dbError(res, e); }
+  res.json(publicStaff(member));
+});
+
+app.patch('/api/admin/staff/:id', requireManager, async (req, res) => {
+  const member = staff.find((m) => m.id === req.params.id);
+  if (!member) return res.status(404).json({ error: 'Compte introuvable' });
+  const v = checkStaffInput(req.body, member.id);
+  if (v.error) return res.status(400).json(v);
+  const roleChanged = member.role !== v.role;
+  member.name = v.name; member.role = v.role;
+  if (v.pin) { member.salt = crypto.randomBytes(12).toString('hex'); member.hash = hashPin(v.pin, member.salt); }
+  try { await saveStaff(); } catch (e) { return dbError(res, e); }
+  if (roleChanged || v.pin) endSessions(member.id); // la personne doit se reconnecter
+  else for (const s of sessions.values()) if (s.staffId === member.id) s.name = member.name;
+  res.json(publicStaff(member));
+});
+
+app.delete('/api/admin/staff/:id', requireManager, async (req, res) => {
+  const before = staff;
+  staff = staff.filter((m) => m.id !== req.params.id);
+  try { await saveStaff(); } catch (e) { staff = before; return dbError(res, e); }
+  endSessions(req.params.id);
+  res.json({ ok: true });
+});
 
 app.get('/api/admin/orders', requireAdmin, (_req, res) => {
   const since = Date.now() - 24 * 3600e3;
@@ -208,7 +308,7 @@ app.patch('/api/admin/orders/:id', requireAdmin, async (req, res) => {
   res.json(order);
 });
 
-app.get('/api/admin/tables', requireAdmin, async (_req, res) => {
+app.get('/api/admin/tables', requireManager, async (_req, res) => {
   const out = await Promise.all(tables.map(async (t) => {
     const url = `${BASE_URL}/t/${t.token}`;
     const qr = await QRCode.toDataURL(url, { width: 600, margin: 1, errorCorrectionLevel: 'M', color: { dark: '#14110f', light: '#ffffff' } });
@@ -217,7 +317,7 @@ app.get('/api/admin/tables', requireAdmin, async (_req, res) => {
   res.json(out);
 });
 
-app.post('/api/admin/tables', requireAdmin, async (_req, res) => {
+app.post('/api/admin/tables', requireManager, async (_req, res) => {
   const t = newTable(Math.max(0, ...tables.map((x) => x.number)) + 1);
   tables.push(t);
   try { await saveTables(); } catch (e) { return dbError(res, e); }
@@ -225,7 +325,7 @@ app.post('/api/admin/tables', requireAdmin, async (_req, res) => {
 });
 
 // Régénère le QR d'une table (invalide l'ancien)
-app.post('/api/admin/tables/:id/regenerate', requireAdmin, async (req, res) => {
+app.post('/api/admin/tables/:id/regenerate', requireManager, async (req, res) => {
   const t = tables.find((x) => x.id === req.params.id);
   if (!t) return res.status(404).json({ error: 'Table introuvable' });
   t.token = crypto.randomBytes(9).toString('base64url');
@@ -233,13 +333,13 @@ app.post('/api/admin/tables/:id/regenerate', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/admin/tables/:id', requireAdmin, async (req, res) => {
+app.delete('/api/admin/tables/:id', requireManager, async (req, res) => {
   tables = tables.filter((x) => x.id !== req.params.id);
   try { await saveTables(); } catch (e) { return dbError(res, e); }
   res.json({ ok: true });
 });
 
-app.get('/api/admin/menu', requireAdmin, (_req, res) => res.json(menu));
+app.get('/api/admin/menu', requireManager, (_req, res) => res.json(menu));
 
 // Enregistre la carte complète envoyée par l'éditeur (tout est revérifié ici)
 function slug(text) {
@@ -287,7 +387,7 @@ function cleanMenu(input) {
     })),
   };
 }
-app.put('/api/admin/menu', requireAdmin, async (req, res) => {
+app.put('/api/admin/menu', requireManager, async (req, res) => {
   const next = cleanMenu(req.body);
   const before = new Set(allItems().map((i) => i.image).filter(Boolean));
   const previous = menu;
@@ -301,7 +401,7 @@ app.put('/api/admin/menu', requireAdmin, async (req, res) => {
   res.json(menu);
 });
 
-app.patch('/api/admin/menu/:id', requireAdmin, async (req, res) => {
+app.patch('/api/admin/menu/:id', requireManager, async (req, res) => {
   const item = findItem(req.params.id);
   if (!item) return res.status(404).json({ error: 'Plat introuvable' });
   if (typeof req.body.available === 'boolean') item.available = req.body.available;
@@ -313,7 +413,8 @@ app.patch('/api/admin/menu/:id', requireAdmin, async (req, res) => {
 // ---------- Temps réel ----------
 io.on('connection', (socket) => {
   const { role, token } = socket.handshake.auth || {};
-  if (role === 'staff' && isAdmin(token)) socket.join('staff');
+  const s = role === 'staff' && sessions.get(token || '');
+  if (s) { socket.data.staffId = s.staffId; socket.join('staff'); }
   else if (role === 'table' && tableByToken(token)) socket.join('table:' + token);
   else socket.disconnect(true);
 });

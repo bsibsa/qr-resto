@@ -42,6 +42,17 @@ précision (« sans oignons »), note pour la cuisine, suivi en direct
 bouton « Encaissée » pour suivre ce qui reste à régler, appels des tables, statistiques du jour, génération et impression des QR,
 plats marqués « épuisés » en un clic (retirés instantanément chez les clients).
 
+## Équipe
+
+Onglet **Équipe** (gérant) : un code personnel par membre du personnel.
+- **Gérant** : commandes, carte, tables, équipe.
+- **Serveur** : commandes uniquement.
+
+Le code `ADMIN_PIN` reste toujours valable comme gérant principal (code de secours). Les codes sont
+enregistrés chiffrés (scrypt). Supprimer un compte ou changer son code le déconnecte immédiatement.
+
+Anti-abus : 5 commandes maximum par table en 10 minutes, 3 appels du serveur en 2 minutes.
+
 ## Modifier la carte
 
 Onglet **Menu** de l'interface restaurant : nom et slogan, catégories, plats (prix, description, emoji,

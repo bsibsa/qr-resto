@@ -31,7 +31,7 @@
     unlockAudio();
     const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: $('#pin').value }) });
     if (!r.ok) {
-      $('#loginErr').textContent = 'Code incorrect';
+      $('#loginErr').textContent = (await r.json().catch(() => ({}))).error || 'Code incorrect';
       $('.login-box').classList.remove('shake'); void $('.login-box').offsetWidth; $('.login-box').classList.add('shake');
       $('#pin').value = '';
       return;
@@ -41,15 +41,24 @@
     start();
   });
   function logout() {
+    if (token) fetch('/api/admin/logout', { method: 'POST', headers: { 'x-admin-token': token } }).catch(() => {});
     token = null; ls.set('adminToken', null);
     socket?.disconnect();
     $('#app').hidden = true; $('#login').hidden = false;
   }
 
+  let me = null;
   async function start() {
     const s = await api('/api/admin/session');
+    me = s.me;
     fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: s.restaurant.currency });
     $('#brandName').textContent = s.restaurant.name;
+    // Un serveur ne voit que l'onglet Commandes
+    const manager = me.role === 'manager';
+    document.querySelectorAll('[data-manager]').forEach((el) => { el.hidden = !manager; });
+    $('#me').innerHTML = `${esc(me.name)} <small>${manager ? 'Gérant' : 'Serveur'}</small>`;
+    showTab('orders');
+    draft = null; setDirty(false);
     $('#login').hidden = true; $('#app').hidden = false;
     $('#soundBtn').classList.toggle('off', !sound);
     orders = await api('/api/admin/orders');
@@ -166,13 +175,88 @@
   }), 30000);
 
   // ---------- Onglets ----------
+  function showTab(name) {
+    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
+    document.querySelectorAll('.view').forEach((v) => { v.hidden = v.id !== 'view-' + name; });
+    if (name === 'tables') loadTables();
+    if (name === 'menu') loadMenu();
+    if (name === 'team') loadTeam();
+  }
   $('.tabs').addEventListener('click', (e) => {
     const t = e.target.closest('.tab');
-    if (!t) return;
-    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
-    document.querySelectorAll('.view').forEach((v) => { v.hidden = v.id !== 'view-' + t.dataset.tab; });
-    if (t.dataset.tab === 'tables') loadTables();
-    if (t.dataset.tab === 'menu') loadMenu();
+    if (t) showTab(t.dataset.tab);
+  });
+  $('#logoutBtn').addEventListener('click', () => {
+    if (dirty) { toast('Enregistrez ou annulez vos modifications de la carte avant de vous déconnecter'); return showTab('menu'); }
+    logout();
+  });
+
+  // ---------- Équipe ----------
+  let team = [];
+  let editing = null, confirmDel = null;
+  async function loadTeam() {
+    team = await api('/api/admin/staff');
+    renderTeam();
+  }
+  const roleName = (r) => (r === 'manager' ? 'Gérant' : 'Serveur');
+  function renderTeam() {
+    $('#teamList').innerHTML = `
+      <div class="member master"><div class="m-ava">★</div><div class="m-info"><b>Gérant principal</b><small>Code défini sur Render (ADMIN_PIN) · toujours valable, sert de secours</small></div><span class="role manager">Gérant</span></div>
+      ${team.map((m) => editing === m.id ? `
+        <form class="member editing" data-id="${m.id}">
+          <div class="team-grid">
+            <label class="ed-field"><span>Prénom</span><input name="name" maxlength="40" value="${esc(m.name)}" required /></label>
+            <label class="ed-field"><span>Rôle</span><select name="role"><option value="waiter" ${m.role === 'waiter' ? 'selected' : ''}>Serveur</option><option value="manager" ${m.role === 'manager' ? 'selected' : ''}>Gérant</option></select></label>
+            <label class="ed-field"><span>Nouveau code (vide = inchangé)</span><input name="pin" inputmode="numeric" maxlength="8" placeholder="••••" /></label>
+          </div>
+          <div class="row"><button type="button" class="btn sm ghost" data-team="cancel">Annuler</button><button class="btn sm primary">Enregistrer</button></div>
+        </form>` : `
+        <div class="member" data-id="${m.id}">
+          <div class="m-ava">${esc(m.name.slice(0, 1).toUpperCase())}</div>
+          <div class="m-info"><b>${esc(m.name)}</b><small>${m.role === 'manager' ? 'Accès complet' : 'Commandes uniquement'}</small></div>
+          <span class="role ${m.role}">${roleName(m.role)}</span>
+          ${confirmDel === m.id
+            ? `<span class="ed-confirm inline">Supprimer ${esc(m.name)} ? <button class="btn sm danger-fill" data-team="del-yes">Oui</button><button class="btn sm ghost" data-team="cancel">Non</button></span>`
+            : `<button class="btn sm ghost" data-team="edit">Modifier</button><button class="btn sm ghost danger" data-team="del">Supprimer</button>`}
+        </div>`).join('')}
+      ${team.length ? '' : '<p class="empty">Aucun compte pour l\'instant. Ajoutez vos serveurs ci-dessus : chacun aura son propre code.</p>'}`;
+  }
+  $('#tGen').addEventListener('click', () => { $('#tPin').value = String(Math.floor(1000 + Math.random() * 9000)); });
+  $('#tPin').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
+  $('#teamForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('#tName').value, pin = $('#tPin').value;
+    const r = await api('/api/admin/staff', { method: 'POST', body: { name, role: $('#tRole').value, pin } });
+    if (r.error) return toast(r.error);
+    toast(`${r.name} est ajouté·e. Son code : ${pin}`);
+    $('#teamForm').reset();
+    loadTeam();
+  });
+  $('#teamList').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-team]');
+    if (!b) return;
+    const id = b.closest('[data-id]').dataset.id;
+    const act = b.dataset.team;
+    if (act === 'edit') { editing = id; confirmDel = null; }
+    if (act === 'del') { confirmDel = id; editing = null; }
+    if (act === 'cancel') { editing = null; confirmDel = null; }
+    if (act === 'del-yes') {
+      const r = await api('/api/admin/staff/' + id, { method: 'DELETE' });
+      if (r.error) return toast(r.error);
+      confirmDel = null; toast('Compte supprimé : la personne est déconnectée');
+      return loadTeam();
+    }
+    renderTeam();
+  });
+  $('#teamList').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target, id = f.dataset.id;
+    const el = (n) => f.elements.namedItem(n);
+    const body = { name: el('name').value, role: el('role').value, pin: el('pin').value.trim() };
+    const r = await api('/api/admin/staff/' + id, { method: 'PATCH', body });
+    if (r.error) return toast(r.error);
+    editing = null; toast('Compte mis à jour');
+    loadTeam();
   });
 
   // ---------- Tables & QR ----------
