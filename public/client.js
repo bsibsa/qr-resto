@@ -10,7 +10,6 @@
   let data, fmt;
   let cart = store.get('cart:' + token, []); // [{key, id, qty, note}]
   let myOrders = [];
-  let pendingOrder = null;
   let freshOrderId = null;
   const items = new Map();
 
@@ -36,7 +35,6 @@
     $('#restoName').textContent = data.restaurant.name;
     $('#restoTagline').textContent = data.restaurant.tagline;
     $('#tableBadge').textContent = `Table ${data.table.number}`;
-    if (data.payment.mode !== 'demo') $('#demoNote').hidden = true;
 
     renderMenu();
     renderCart();
@@ -44,7 +42,6 @@
 
     await loadOrders();
     connectSocket();
-    await handleReturnFromCheckout();
   }
 
   async function loadOrders() {
@@ -85,22 +82,6 @@
         toast(`« ${it.name} » vient d'être épuisé et a été retiré du panier`);
       }
     });
-  }
-
-  async function handleReturnFromCheckout() {
-    const p = new URLSearchParams(location.search);
-    history.replaceState(null, '', location.pathname);
-    if (p.get('order') && p.get('session_id')) {
-      const r = await fetch(`/api/orders/${p.get('order')}/confirm`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: p.get('session_id') }),
-      });
-      const j = await r.json();
-      if (j.order?.paid) { onOrderPlaced(j.order); }
-      else toast('Paiement non confirmé');
-    } else if (p.get('cancelled')) {
-      post(`/api/orders/${p.get('cancelled')}/cancel-payment`, { token });
-      toast('Paiement annulé — votre panier est conservé');
-    }
   }
 
   // ---------- Menu ----------
@@ -256,18 +237,13 @@
   // ---------- Commande ----------
   $('#orderBtn').addEventListener('click', async () => {
     const btn = $('#orderBtn');
-    const payment = document.querySelector('input[name="pay"]:checked').value;
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
     try {
       const r = await post(`/api/table/${token}/orders`, {
         items: cart.map((l) => ({ id: l.id, qty: l.qty, note: l.note })),
         note: $('#orderNote').value.trim(),
-        payment,
       });
       if (r.error) throw new Error(r.error);
-      rememberOrder(r.order.id);
-      if (r.checkoutUrl) { location.href = r.checkoutUrl; return; }
-      if (r.demo) { pendingOrder = r.order; openPay(); return; }
       onOrderPlaced(r.order);
     } catch (e) {
       toast(e.message || 'Erreur, réessayez');
@@ -287,48 +263,17 @@
     setTimeout(() => { renderTrack(); openSheet('#trackSheet'); }, 250);
   }
 
-  // ---------- Paiement (démo) ----------
-  function openPay() {
-    $('#payAmount').textContent = fmt.format(pendingOrder.total / 100);
-    $('#payForm').reset();
-    ['#ccNum', '#ccName', '#ccExp'].forEach((s) => $(s).textContent = $(s).dataset.def ||= $(s).textContent);
-    openSheet('#paySheet');
-  }
-  $('#fNum').addEventListener('input', (e) => {
-    const v = e.target.value.replace(/\D/g, '').slice(0, 16);
-    e.target.value = v.replace(/(.{4})/g, '$1 ').trim();
-    $('#ccNum').textContent = (v + '•'.repeat(16 - v.length)).replace(/(.{4})/g, '$1 ').trim();
-  });
-  $('#fName').addEventListener('input', (e) => { $('#ccName').textContent = e.target.value.toUpperCase() || 'NOM DU TITULAIRE'; });
-  $('#fExp').addEventListener('input', (e) => {
-    const v = e.target.value.replace(/\D/g, '').slice(0, 4);
-    e.target.value = v.length > 2 ? v.slice(0, 2) + '/' + v.slice(2) : v;
-    $('#ccExp').textContent = e.target.value || 'MM/AA';
-  });
-  $('#fCvc').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
-  $('#payForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = $('#payBtn');
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Paiement en cours…';
-    await new Promise((r) => setTimeout(r, 1400));
-    const r = await post(`/api/orders/${pendingOrder.id}/demo-pay`, { token });
-    btn.disabled = false; btn.innerHTML = `Payer <span id="payAmount">${fmt.format(pendingOrder.total / 100)}</span>`;
-    if (r.error) return toast(r.error);
-    pendingOrder = null;
-    onOrderPlaced(r.order);
-  });
-
   // ---------- Suivi ----------
   function updateOrdersBtn() {
-    const active = myOrders.some((o) => o.status !== 'served' && o.status !== 'awaiting_payment');
-    $('#ordersBtn').hidden = !myOrders.some((o) => o.status !== 'awaiting_payment');
+    const active = myOrders.some((o) => o.status !== 'served');
+    $('#ordersBtn').hidden = !myOrders.length;
     $('#ordersBtn .dot').style.display = active ? '' : 'none';
   }
   $('#ordersBtn').addEventListener('click', () => { renderTrack(); openSheet('#trackSheet'); });
   $('#trackClose').addEventListener('click', closeSheets);
 
   function renderTrack() {
-    const list = myOrders.filter((o) => o.status !== 'awaiting_payment').sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const list = [...myOrders].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     $('#trackList').innerHTML = list.map((o) => {
       const idx = STEPS.findIndex((s) => s[0] === o.status);
       const fresh = o.id === freshOrderId;
@@ -364,10 +309,6 @@
     document.body.classList.add('locked');
   }
   function closeSheets() {
-    if ($('#paySheet').classList.contains('show') && pendingOrder) {
-      post(`/api/orders/${pendingOrder.id}/cancel-payment`, { token });
-      pendingOrder = null;
-    }
     document.querySelectorAll('.sheet.show').forEach((s) => { s.classList.remove('show'); s.style.transform = ''; });
     $('#scrim').classList.remove('show');
     document.body.classList.remove('locked');

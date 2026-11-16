@@ -203,37 +203,14 @@ input, textarea { font: inherit; color: inherit; }
 .cline .n small { display: block; color: var(--muted); font-size: 12px; }
 .cline .p { font-weight: 600; min-width: 64px; text-align: right; }
 
-.pay-choice { margin: 16px 0 6px; display: grid; gap: 10px; }
-.pay-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
-.pay-opt input { position: absolute; opacity: 0; }
-.pay-card {
-  display: flex; gap: 14px; align-items: center; padding: 14px; border-radius: 16px;
-  background: var(--card); border: 1.5px solid var(--line); transition: all .25s var(--ease);
+.pay-info {
+  display: flex; gap: 14px; align-items: center; padding: 14px; border-radius: 16px; margin: 16px 0 6px;
+  background: rgba(233,163,91,.08); border: 1.5px solid rgba(233,163,91,.35);
 }
-.pay-card small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+.pay-info small { display: block; color: var(--muted); font-size: 12px; }
 .pay-ico { font-size: 24px; }
-.pay-opt input:checked + .pay-card { border-color: var(--accent); background: rgba(233,163,91,.08); }
 .total-row { display: flex; justify-content: space-between; font: 700 20px Fraunces, serif; margin: 18px 0 4px; }
 
-/* Carte bancaire */
-.demo-note { font-size: 12px; color: var(--accent); background: rgba(233,163,91,.1); padding: 8px 12px; border-radius: 10px; }
-.cc {
-  margin: 16px 0 6px; aspect-ratio: 1.586; max-width: 360px; border-radius: 20px; padding: 22px; position: relative; overflow: hidden;
-  background: linear-gradient(135deg, #3a2a1e, #1a1411 60%), #222; border: 1px solid rgba(233,163,91,.3);
-  display: flex; flex-direction: column; justify-content: space-between; font-family: ui-monospace, monospace;
-  box-shadow: 0 20px 40px -15px rgba(0,0,0,.7);
-}
-.cc::after {
-  content: ''; position: absolute; inset: -50%;
-  background: linear-gradient(115deg, transparent 40%, rgba(255,255,255,.12) 50%, transparent 60%);
-  animation: shine 3.5s infinite;
-}
-@keyframes shine { from { transform: translateX(-60%); } to { transform: translateX(60%); } }
-.cc-chip { width: 44px; height: 32px; border-radius: 7px; background: linear-gradient(135deg, #e9c37b, #a77b3a); }
-.cc-num { font-size: clamp(16px, 5vw, 21px); letter-spacing: .12em; }
-.cc-bottom { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); text-transform: uppercase; }
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.two .field { margin: 0; }
 
 /* Suivi de commande */
 .track { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }

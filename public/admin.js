@@ -50,7 +50,6 @@
     const s = await api('/api/admin/session');
     fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: s.restaurant.currency });
     $('#brandName').textContent = s.restaurant.name;
-    $('#payMode').textContent = s.paymentMode === 'stripe' ? 'Paiement : Stripe' : 'Paiement : démo';
     $('#login').hidden = true; $('#app').hidden = false;
     $('#soundBtn').classList.toggle('off', !sound);
     orders = await api('/api/admin/orders');
@@ -108,7 +107,7 @@
       <ul>${o.items.map((l) => `<li><span class="q">${l.qty}×</span><span>${esc(l.emoji)} ${esc(l.name)}${l.note ? `<small>→ ${esc(l.note)}</small>` : ''}</span></li>`).join('')}</ul>
       ${o.note ? `<div class="onote">📝 ${esc(o.note)}</div>` : ''}
       <div class="order-foot">
-        <span class="pay ${o.paid ? 'ok' : 'due'}">${o.paid ? (o.payment === 'card' ? '💳 Payée' : '✓ Encaissée') : '€ À encaisser'}</span>
+        <span class="pay ${o.paid ? 'ok' : 'due'}">${o.paid ? '✓ Encaissée' : '€ À encaisser'}</span>
         <span class="total">${fmt.format(o.total / 100)}</span>
         <span class="grow"></span>
         ${!o.paid ? `<button class="btn sm ghost" data-act="paid">Encaissée</button>` : ''}
@@ -203,7 +202,7 @@
     const sheet = document.createElement('div');
     sheet.className = 'print-sheet';
     const name = esc($('#brandName').textContent);
-    sheet.innerHTML = tablesCache.map((t) => `<div class="pcard"><h4>${name}</h4><img src="${t.qr}" alt="" /><p>Scannez pour voir le menu,<br>commander et payer</p><div class="t">Table ${t.number}</div></div>`).join('');
+    sheet.innerHTML = tablesCache.map((t) => `<div class="pcard"><h4>${name}</h4><img src="${t.qr}" alt="" /><p>Scannez pour voir le menu<br>et commander</p><div class="t">Table ${t.number}</div></div>`).join('');
     document.body.appendChild(sheet);
     setTimeout(() => window.print(), 100);
   });

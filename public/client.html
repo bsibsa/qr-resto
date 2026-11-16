@@ -43,7 +43,7 @@
 
   <main id="menu" class="menu"></main>
 
-  <footer class="foot">Commandez et payez depuis votre table · le personnel vous apporte tout</footer>
+  <footer class="foot">Commandez depuis votre table · le personnel vous apporte tout</footer>
 
   <!-- Barre panier -->
   <button class="cart-bar" id="cartBar" hidden>
@@ -83,45 +83,12 @@
       <span>Note pour la cuisine</span>
       <textarea id="orderNote" rows="2" maxlength="300" placeholder="Allergies, ordre de service…"></textarea>
     </label>
-    <div class="pay-choice">
-      <span class="pay-title">Paiement</span>
-      <label class="pay-opt">
-        <input type="radio" name="pay" value="card" checked />
-        <span class="pay-card">
-          <span class="pay-ico">💳</span>
-          <span><b>Carte bancaire</b><small>Payez maintenant, c'est réglé</small></span>
-        </span>
-      </label>
-      <label class="pay-opt">
-        <input type="radio" name="pay" value="counter" />
-        <span class="pay-card">
-          <span class="pay-ico">🧾</span>
-          <span><b>Plus tard</b><small>Réglez au comptoir ou au serveur</small></span>
-        </span>
-      </label>
+    <div class="pay-info">
+      <span class="pay-ico">🧾</span>
+      <span><b>Paiement au comptoir ou au serveur</b><small>Commandez maintenant, réglez quand vous voulez.</small></span>
     </div>
     <div class="total-row"><span>Total</span><span id="sheetTotal">0,00 €</span></div>
     <button class="btn primary block" id="orderBtn">Commander</button>
-  </section>
-
-  <section class="sheet tall" id="paySheet" aria-modal="true" role="dialog">
-    <div class="sheet-handle"></div>
-    <h2 class="sheet-title">Paiement sécurisé</h2>
-    <div class="demo-note" id="demoNote">Mode démo — aucun débit réel. Utilisez n'importe quel numéro.</div>
-    <div class="cc" id="ccVisual">
-      <div class="cc-chip"></div>
-      <div class="cc-num" id="ccNum">•••• •••• •••• ••••</div>
-      <div class="cc-bottom"><span id="ccName">NOM DU TITULAIRE</span><span id="ccExp">MM/AA</span></div>
-    </div>
-    <form id="payForm" class="pay-form" autocomplete="off">
-      <label class="field"><span>Numéro de carte</span><input id="fNum" inputmode="numeric" placeholder="4242 4242 4242 4242" required /></label>
-      <label class="field"><span>Titulaire</span><input id="fName" placeholder="Camille Martin" required /></label>
-      <div class="two">
-        <label class="field"><span>Expiration</span><input id="fExp" inputmode="numeric" placeholder="12/28" required /></label>
-        <label class="field"><span>CVC</span><input id="fCvc" inputmode="numeric" placeholder="123" maxlength="4" required /></label>
-      </div>
-      <button class="btn primary block" id="payBtn" type="submit">Payer <span id="payAmount"></span></button>
-    </form>
   </section>
 
   <section class="sheet tall" id="trackSheet" aria-modal="true" role="dialog">

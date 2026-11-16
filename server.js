@@ -1,4 +1,4 @@
-// Serveur QR Resto — commande et paiement à table via QR code
+// Serveur QR Resto — commande à table via QR code, règlement au comptoir
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -10,7 +10,6 @@ const { Server } = require('socket.io');
 const PORT = Number(process.env.PORT) || 3000;
 const BASE_URL = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const ADMIN_PIN = process.env.ADMIN_PIN || '1234';
-const stripe = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
 
 // ---------- Persistance (fichiers JSON) ----------
 const DATA_DIR = path.join(__dirname, 'data');
@@ -59,20 +58,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Webhook Stripe (corps brut obligatoire, donc avant express.json)
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
-  if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) return res.sendStatus(400);
-  let event;
-  try {
-    event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (e) { return res.status(400).send(`Webhook error: ${e.message}`); }
-  if (event.type === 'checkout.session.completed') {
-    const s = event.data.object;
-    if (s.payment_status === 'paid') markPaid(s.metadata.orderId, s.id);
-  }
-  res.json({ received: true });
-});
-
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
@@ -96,7 +81,6 @@ app.get('/api/table/:token', (req, res) => {
     table: { number: table.number },
     restaurant: menu.restaurant,
     categories: menu.categories,
-    payment: { card: true, mode: stripe ? 'stripe' : 'demo' },
   });
 });
 
@@ -112,9 +96,8 @@ app.get('/api/table/:token/orders', (req, res) => {
 app.post('/api/table/:token/orders', async (req, res) => {
   const table = tableByToken(req.params.token);
   if (!table) return res.status(404).json({ error: 'Table inconnue' });
-  const { items, note = '', payment } = req.body || {};
+  const { items, note = '' } = req.body || {};
   if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Panier vide' });
-  if (!['card', 'counter'].includes(payment)) return res.status(400).json({ error: 'Mode de paiement invalide' });
 
   // Les prix sont toujours recalculés côté serveur
   const lines = [];
@@ -137,69 +120,17 @@ app.post('/api/table/:token/orders', async (req, res) => {
     items: lines,
     note: String(note).slice(0, 300),
     total: lines.reduce((s, l) => s + l.price * l.qty, 0),
-    payment,
+    payment: 'counter',
     paid: false,
-    status: payment === 'card' ? 'awaiting_payment' : 'new',
+    status: 'new',
     createdAt: now,
     updatedAt: now,
   };
   orders.push(order);
   saveOrders();
 
-  if (payment === 'counter') {
-    broadcast(order, true);
-    return res.json({ order: publicOrder(order) });
-  }
-
-  if (!stripe) return res.json({ order: publicOrder(order), demo: true });
-
-  try {
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      line_items: lines.map((l) => ({
-        quantity: l.qty,
-        price_data: { currency: menu.restaurant.currency.toLowerCase(), unit_amount: l.price, product_data: { name: l.name } },
-      })),
-      metadata: { orderId: order.id },
-      success_url: `${BASE_URL}/t/${table.token}?order=${order.id}&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${BASE_URL}/t/${table.token}?cancelled=${order.id}`,
-    });
-    order.stripeSession = session.id;
-    saveOrders();
-    res.json({ order: publicOrder(order), checkoutUrl: session.url });
-  } catch (e) {
-    order.status = 'cancelled';
-    saveOrders();
-    res.status(502).json({ error: 'Paiement indisponible : ' + e.message });
-  }
-});
-
-// Retour de Stripe Checkout : on vérifie le paiement auprès de Stripe
-app.post('/api/orders/:id/confirm', async (req, res) => {
-  const order = orders.find((o) => o.id === req.params.id);
-  if (!order || !stripe) return res.status(404).json({ error: 'Commande introuvable' });
-  if (!order.paid) {
-    try {
-      const s = await stripe.checkout.sessions.retrieve(req.body.sessionId);
-      if (s.id === order.stripeSession && s.payment_status === 'paid') markPaid(order.id, s.id);
-    } catch (e) { return res.status(400).json({ error: e.message }); }
-  }
+  broadcast(order, true);
   res.json({ order: publicOrder(order) });
-});
-
-// Paiement simulé (uniquement sans clé Stripe)
-app.post('/api/orders/:id/demo-pay', (req, res) => {
-  if (stripe) return res.status(403).json({ error: 'Mode démo désactivé' });
-  const order = orders.find((o) => o.id === req.params.id && o.tableToken === req.body.token);
-  if (!order) return res.status(404).json({ error: 'Commande introuvable' });
-  markPaid(order.id, 'demo');
-  res.json({ order: publicOrder(order) });
-});
-
-app.post('/api/orders/:id/cancel-payment', (req, res) => {
-  const order = orders.find((o) => o.id === req.params.id && o.tableToken === req.body.token);
-  if (order && order.status === 'awaiting_payment') { order.status = 'cancelled'; saveOrders(); }
-  res.json({ ok: true });
 });
 
 app.post('/api/table/:token/call', (req, res) => {
@@ -209,18 +140,6 @@ app.post('/api/table/:token/call', (req, res) => {
   io.to('staff').emit('call', { id: crypto.randomUUID(), table: table.number, reason, at: new Date().toISOString() });
   res.json({ ok: true });
 });
-
-function markPaid(orderId, ref) {
-  const order = orders.find((o) => o.id === orderId);
-  if (!order || order.paid) return;
-  order.paid = true;
-  order.paymentRef = ref;
-  const isNew = order.status === 'awaiting_payment' || order.status === 'cancelled';
-  if (isNew) order.status = 'new';
-  order.updatedAt = new Date().toISOString();
-  saveOrders();
-  broadcast(order, isNew);
-}
 
 function broadcast(order, isNew) {
   io.to('staff').emit(isNew ? 'order:new' : 'order:update', order);
@@ -241,11 +160,11 @@ app.post('/api/admin/login', (req, res) => {
   res.json({ token });
 });
 
-app.get('/api/admin/session', requireAdmin, (_req, res) => res.json({ restaurant: menu.restaurant, paymentMode: stripe ? 'stripe' : 'demo' }));
+app.get('/api/admin/session', requireAdmin, (_req, res) => res.json({ restaurant: menu.restaurant }));
 
 app.get('/api/admin/orders', requireAdmin, (_req, res) => {
   const since = Date.now() - 24 * 3600e3;
-  res.json(orders.filter((o) => new Date(o.createdAt) > since && o.status !== 'awaiting_payment' && o.status !== 'cancelled'));
+  res.json(orders.filter((o) => new Date(o.createdAt) > since && o.status !== 'cancelled'));
 });
 
 const FLOW = ['new', 'preparing', 'ready', 'served'];
@@ -315,5 +234,5 @@ server.listen(PORT, () => {
   console.log(`\n🍽  QR Resto démarré sur ${BASE_URL}`);
   console.log(`   Interface restaurant : ${BASE_URL}/admin  (code PIN : ${process.env.ADMIN_PIN ? '••••' : ADMIN_PIN})`);
   console.log(`   Exemple table 1      : ${BASE_URL}/t/${tables[0]?.token}`);
-  console.log(`   Paiement             : ${stripe ? 'Stripe' : 'mode DÉMO (définir STRIPE_SECRET_KEY pour activer Stripe)'}\n`);
+  console.log('   Paiement             : au comptoir / auprès du serveur\n');
 });
