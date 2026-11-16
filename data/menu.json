@@ -1,0 +1,64 @@
+{
+  "restaurant": {
+    "name": "Le Comptoir",
+    "tagline": "Bistrot & bar à cocktails",
+    "currency": "EUR"
+  },
+  "categories": [
+    {
+      "id": "aperitifs",
+      "name": "À partager",
+      "icon": "🫒",
+      "items": [
+        { "id": "planche-mixte", "name": "Planche mixte", "description": "Charcuterie fine, comté 18 mois, cornichons, pain de campagne grillé", "price": 1650, "emoji": "🧀", "tags": ["À partager"], "available": true },
+        { "id": "houmous", "name": "Houmous maison", "description": "Pois chiches, tahini, huile d'olive fumée, pain pita chaud", "price": 750, "emoji": "🫓", "tags": ["Végé"], "available": true },
+        { "id": "croquettes", "name": "Croquettes de jambon", "description": "Six croquettes crémeuses, mayonnaise au piment d'Espelette", "price": 900, "emoji": "🥟", "tags": [], "available": true },
+        { "id": "frites-truffe", "name": "Frites à la truffe", "description": "Frites fraîches, huile de truffe, parmesan râpé", "price": 650, "emoji": "🍟", "tags": ["Végé"], "available": true }
+      ]
+    },
+    {
+      "id": "plats",
+      "name": "Plats",
+      "icon": "🍽",
+      "items": [
+        { "id": "burger", "name": "Burger du Comptoir", "description": "Bœuf français 180 g, cheddar affiné, oignons confits, sauce maison, frites", "price": 1850, "emoji": "🍔", "tags": ["Signature"], "available": true },
+        { "id": "tartare", "name": "Tartare de bœuf", "description": "Coupé au couteau, câpres, échalotes, jaune d'œuf, frites et salade", "price": 1990, "emoji": "🥩", "tags": [], "available": true },
+        { "id": "risotto", "name": "Risotto aux champignons", "description": "Arborio crémeux, champignons des bois, parmesan, huile de noisette", "price": 1700, "emoji": "🍄", "tags": ["Végé"], "available": true },
+        { "id": "poisson", "name": "Poisson du jour", "description": "Selon l'arrivage, beurre blanc citronné, légumes de saison", "price": 2200, "emoji": "🐟", "tags": [], "available": true },
+        { "id": "curry", "name": "Curry vert de légumes", "description": "Lait de coco, citronnelle, riz jasmin, coriandre fraîche", "price": 1600, "emoji": "🍛", "tags": ["Vegan", "Épicé"], "available": true }
+      ]
+    },
+    {
+      "id": "desserts",
+      "name": "Desserts",
+      "icon": "🍰",
+      "items": [
+        { "id": "moelleux", "name": "Moelleux au chocolat", "description": "Cœur coulant, glace vanille de Madagascar", "price": 850, "emoji": "🍫", "tags": ["Signature"], "available": true },
+        { "id": "tiramisu", "name": "Tiramisu", "description": "Mascarpone, café serré, cacao amer", "price": 800, "emoji": "🍮", "tags": [], "available": true },
+        { "id": "cafe-gourmand", "name": "Café gourmand", "description": "Espresso et trois mignardises du moment", "price": 900, "emoji": "☕", "tags": [], "available": true }
+      ]
+    },
+    {
+      "id": "cocktails",
+      "name": "Cocktails",
+      "icon": "🍸",
+      "items": [
+        { "id": "spritz", "name": "Spritz", "description": "Apérol, prosecco, eau gazeuse, orange", "price": 950, "emoji": "🍹", "tags": [], "available": true },
+        { "id": "mojito", "name": "Mojito", "description": "Rhum blanc, menthe fraîche, citron vert, sucre de canne", "price": 1050, "emoji": "🌿", "tags": [], "available": true },
+        { "id": "espresso-martini", "name": "Espresso Martini", "description": "Vodka, liqueur de café, espresso", "price": 1200, "emoji": "🍸", "tags": ["Signature"], "available": true },
+        { "id": "virgin", "name": "Virgin Passion", "description": "Fruit de la passion, ananas, citron vert, ginger beer", "price": 750, "emoji": "🥭", "tags": ["Sans alcool"], "available": true }
+      ]
+    },
+    {
+      "id": "boissons",
+      "name": "Bières & softs",
+      "icon": "🍺",
+      "items": [
+        { "id": "pinte", "name": "Pinte blonde", "description": "Bière pression locale, 50 cl", "price": 750, "emoji": "🍺", "tags": [], "available": true },
+        { "id": "verre-vin", "name": "Verre de vin", "description": "Rouge, blanc ou rosé — précisez dans la note", "price": 650, "emoji": "🍷", "tags": [], "available": true },
+        { "id": "limonade", "name": "Limonade artisanale", "description": "Citron, sirop maison, eau pétillante", "price": 500, "emoji": "🍋", "tags": ["Sans alcool"], "available": true },
+        { "id": "eau", "name": "Eau pétillante", "description": "Bouteille 50 cl", "price": 400, "emoji": "💧", "tags": ["Sans alcool"], "available": true }
+      ]
+    }
+  ]
+}

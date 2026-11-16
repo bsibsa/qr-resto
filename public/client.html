@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#14110f" />
+  <title>Menu</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/client.css" />
+</head>
+<body>
+  <!-- Écran d'accueil animé -->
+  <div id="splash" class="splash">
+    <div class="splash-inner">
+      <div class="splash-logo" id="splashLogo">◆</div>
+      <div class="splash-name" id="splashName"></div>
+      <div class="splash-table" id="splashTable"></div>
+    </div>
+  </div>
+
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="hero" id="hero">
+    <div class="hero-top">
+      <div class="table-badge" id="tableBadge">Table —</div>
+      <div class="hero-actions">
+        <button class="icon-btn" id="ordersBtn" aria-label="Mes commandes" hidden>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5h10M9 12h10M9 19h10M4 5h.01M4 12h.01M4 19h.01"/></svg>
+          <span class="dot"></span>
+        </button>
+        <button class="icon-btn" id="callBtn" aria-label="Appeler le serveur">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        </button>
+      </div>
+    </div>
+    <h1 class="hero-title" id="restoName">&nbsp;</h1>
+    <p class="hero-tagline" id="restoTagline">&nbsp;</p>
+  </header>
+
+  <nav class="cats" id="cats"></nav>
+
+  <main id="menu" class="menu"></main>
+
+  <footer class="foot">Commandez et payez depuis votre table · le personnel vous apporte tout</footer>
+
+  <!-- Barre panier -->
+  <button class="cart-bar" id="cartBar" hidden>
+    <span class="cart-count" id="cartCount">0</span>
+    <span class="cart-label">Voir le panier</span>
+    <span class="cart-total" id="cartTotal">0,00 €</span>
+  </button>
+
+  <!-- Feuilles (bottom sheets) -->
+  <div class="scrim" id="scrim"></div>
+
+  <section class="sheet" id="itemSheet" aria-modal="true" role="dialog">
+    <div class="sheet-handle"></div>
+    <div class="item-hero" id="itemHero"></div>
+    <h2 class="sheet-title" id="itemName"></h2>
+    <p class="sheet-desc" id="itemDesc"></p>
+    <div class="tags" id="itemTags"></div>
+    <label class="field">
+      <span>Une précision ?</span>
+      <input id="itemNote" maxlength="140" placeholder="Ex. sans oignons, cuisson saignante…" />
+    </label>
+    <div class="sheet-row">
+      <div class="stepper big">
+        <button data-step="-1" aria-label="Moins">−</button>
+        <span id="itemQty">1</span>
+        <button data-step="1" aria-label="Plus">+</button>
+      </div>
+      <button class="btn primary grow" id="itemAdd">Ajouter · <span id="itemAddPrice"></span></button>
+    </div>
+  </section>
+
+  <section class="sheet tall" id="cartSheet" aria-modal="true" role="dialog">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">Votre commande</h2>
+    <div id="cartLines" class="cart-lines"></div>
+    <label class="field">
+      <span>Note pour la cuisine</span>
+      <textarea id="orderNote" rows="2" maxlength="300" placeholder="Allergies, ordre de service…"></textarea>
+    </label>
+    <div class="pay-choice">
+      <span class="pay-title">Paiement</span>
+      <label class="pay-opt">
+        <input type="radio" name="pay" value="card" checked />
+        <span class="pay-card">
+          <span class="pay-ico">💳</span>
+          <span><b>Carte bancaire</b><small>Payez maintenant, c'est réglé</small></span>
+        </span>
+      </label>
+      <label class="pay-opt">
+        <input type="radio" name="pay" value="counter" />
+        <span class="pay-card">
+          <span class="pay-ico">🧾</span>
+          <span><b>Plus tard</b><small>Réglez au comptoir ou au serveur</small></span>
+        </span>
+      </label>
+    </div>
+    <div class="total-row"><span>Total</span><span id="sheetTotal">0,00 €</span></div>
+    <button class="btn primary block" id="orderBtn">Commander</button>
+  </section>
+
+  <section class="sheet tall" id="paySheet" aria-modal="true" role="dialog">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">Paiement sécurisé</h2>
+    <div class="demo-note" id="demoNote">Mode démo — aucun débit réel. Utilisez n'importe quel numéro.</div>
+    <div class="cc" id="ccVisual">
+      <div class="cc-chip"></div>
+      <div class="cc-num" id="ccNum">•••• •••• •••• ••••</div>
+      <div class="cc-bottom"><span id="ccName">NOM DU TITULAIRE</span><span id="ccExp">MM/AA</span></div>
+    </div>
+    <form id="payForm" class="pay-form" autocomplete="off">
+      <label class="field"><span>Numéro de carte</span><input id="fNum" inputmode="numeric" placeholder="4242 4242 4242 4242" required /></label>
+      <label class="field"><span>Titulaire</span><input id="fName" placeholder="Camille Martin" required /></label>
+      <div class="two">
+        <label class="field"><span>Expiration</span><input id="fExp" inputmode="numeric" placeholder="12/28" required /></label>
+        <label class="field"><span>CVC</span><input id="fCvc" inputmode="numeric" placeholder="123" maxlength="4" required /></label>
+      </div>
+      <button class="btn primary block" id="payBtn" type="submit">Payer <span id="payAmount"></span></button>
+    </form>
+  </section>
+
+  <section class="sheet tall" id="trackSheet" aria-modal="true" role="dialog">
+    <div class="sheet-handle"></div>
+    <div id="trackList"></div>
+    <button class="btn ghost block" id="trackClose">Continuer à parcourir le menu</button>
+  </section>
+
+  <section class="sheet" id="callSheet" aria-modal="true" role="dialog">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">Besoin de quelque chose ?</h2>
+    <div class="call-grid">
+      <button class="call-opt" data-reason="waiter"><span>🙋</span>Appeler un serveur</button>
+      <button class="call-opt" data-reason="bill"><span>🧾</span>Demander l'addition</button>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/client.js"></script>
+</body>
+</html>
