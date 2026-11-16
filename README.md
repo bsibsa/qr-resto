@@ -20,12 +20,13 @@ npm start
 - Interface restaurant : http://localhost:3000/admin (code PIN par défaut : `1234`)
 - Les QR codes de chaque table sont dans l'onglet **Tables & QR** (téléchargement, impression, régénération).
 
-Au premier lancement, 12 tables sont créées avec un lien secret chacune (`data/tables.json`).
+Au premier lancement, 12 tables sont créées avec un lien secret chacune, et la carte d'exemple `data/menu.example.json` est chargée.
 
 ## Configuration (variables d'environnement)
 
 | Variable | Rôle |
 |---|---|
+| `DATABASE_URL` | Base PostgreSQL (ex. Neon). Sans elle, tout est stocké dans `data/` : à réserver aux tests en local |
 | `PORT` | Port HTTP (3000 par défaut) |
 | `BASE_URL` | URL publique du site, encodée dans les QR codes (ex. `https://menu.mon-resto.fr`) |
 | `TABLE_SECRET` | Rend les liens des tables stables même si les fichiers sont effacés (recommandé en ligne) |
@@ -41,17 +42,17 @@ précision (« sans oignons »), note pour la cuisine, suivi en direct
 bouton « Encaissée » pour suivre ce qui reste à régler, appels des tables, statistiques du jour, génération et impression des QR,
 plats marqués « épuisés » en un clic (retirés instantanément chez les clients).
 
-## Modifier le menu
+## Données
 
-Éditez `data/menu.json` (prix en centimes), puis redémarrez le serveur.
+Avec `DATABASE_URL`, le menu, les tables et 90 jours de commandes sont enregistrés dans PostgreSQL
+(tables `kv` et `orders`, créées automatiquement). Sans, ils sont dans `data/*.json`.
 
 ## Structure
 
 ```
-server.js          API, Socket.IO, QR codes
-data/menu.json     carte du restaurant
-data/tables.json   tables et liens secrets (généré)
-data/orders.json   commandes (généré)
+server.js              API, Socket.IO, QR codes
+storage.js             stockage PostgreSQL ou fichiers
+data/menu.example.json carte chargée au premier démarrage
 public/client.*    interface client
 public/admin.*     interface restaurant
 ```

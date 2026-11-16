@@ -6,30 +6,38 @@ const fs = require('fs');
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const { Server } = require('socket.io');
+const { createStorage } = require('./storage');
 
 const PORT = Number(process.env.PORT) || 3000;
 const BASE_URL = (process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const ADMIN_PIN = process.env.ADMIN_PIN || '1234';
 
-// ---------- Persistance (fichiers JSON) ----------
+// ---------- Données (chargées au démarrage depuis la base) ----------
 const DATA_DIR = path.join(__dirname, 'data');
-function load(name, fallback) {
-  try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, name), 'utf8')); }
-  catch { return fallback; }
-}
-function save(name, data) {
-  const file = path.join(DATA_DIR, name);
-  fs.writeFileSync(file + '.tmp', JSON.stringify(data, null, 2));
-  fs.renameSync(file + '.tmp', file);
-}
+let storage;
+let menu;
+let tables;
+let orders = []; // commandes des dernières 48 h, gardées en mémoire pour l'affichage temps réel
 
-const menu = load('menu.json', null);
-if (!menu) throw new Error('data/menu.json est introuvable');
-
-let tables = load('tables.json', null);
-if (!tables) {
-  tables = Array.from({ length: 12 }, (_, i) => newTable(i + 1));
-  save('tables.json', tables);
+async function loadData() {
+  storage = await createStorage(DATA_DIR);
+  menu = await storage.get('menu');
+  if (!menu) { // premier démarrage : carte d'exemple
+    menu = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'menu.example.json'), 'utf8'));
+    await storage.set('menu', menu);
+  }
+  tables = await storage.get('tables');
+  if (!tables) {
+    tables = Array.from({ length: 12 }, (_, i) => newTable(i + 1));
+    await storage.set('tables', tables);
+  }
+  orders = await storage.recentOrders(48);
+}
+const saveMenu = () => storage.set('menu', menu);
+const saveTables = () => storage.set('tables', tables);
+function dbError(res, e) {
+  console.error('[db] écriture impossible :', e.message);
+  res.status(503).json({ error: "Enregistrement impossible pour le moment, réessayez dans un instant" });
 }
 // Avec TABLE_SECRET, le lien de chaque table est dérivé du secret : il reste identique
 // même si l'hébergeur efface les fichiers (QR codes imprimés toujours valides).
@@ -39,9 +47,6 @@ function newTable(number) {
     : crypto.randomBytes(9).toString('base64url');
   return { id: 'table-' + number, number, token };
 }
-
-let orders = load('orders.json', []);
-const saveOrders = () => save('orders.json', orders);
 
 const tableByToken = (t) => tables.find((x) => x.token === t);
 const allItems = () => menu.categories.flatMap((c) => c.items);
@@ -126,8 +131,11 @@ app.post('/api/table/:token/orders', async (req, res) => {
     createdAt: now,
     updatedAt: now,
   };
+  const cutoff = Date.now() - 48 * 3600e3;
+  orders = orders.filter((o) => new Date(o.createdAt) > cutoff);
   orders.push(order);
-  saveOrders();
+  try { await storage.saveOrder(order); }
+  catch (e) { orders = orders.filter((o) => o !== order); return dbError(res, e); }
 
   broadcast(order, true);
   res.json({ order: publicOrder(order) });
@@ -168,14 +176,14 @@ app.get('/api/admin/orders', requireAdmin, (_req, res) => {
 });
 
 const FLOW = ['new', 'preparing', 'ready', 'served'];
-app.patch('/api/admin/orders/:id', requireAdmin, (req, res) => {
+app.patch('/api/admin/orders/:id', requireAdmin, async (req, res) => {
   const order = orders.find((o) => o.id === req.params.id);
   if (!order) return res.status(404).json({ error: 'Commande introuvable' });
   const { status, paid } = req.body;
   if (status && (FLOW.includes(status) || status === 'cancelled')) order.status = status;
   if (paid === true && !order.paid) { order.paid = true; order.paymentRef = 'counter'; }
   order.updatedAt = new Date().toISOString();
-  saveOrders();
+  try { await storage.saveOrder(order); } catch (e) { return dbError(res, e); }
   broadcast(order, false);
   res.json(order);
 });
@@ -189,35 +197,35 @@ app.get('/api/admin/tables', requireAdmin, async (_req, res) => {
   res.json(out);
 });
 
-app.post('/api/admin/tables', requireAdmin, (_req, res) => {
+app.post('/api/admin/tables', requireAdmin, async (_req, res) => {
   const t = newTable(Math.max(0, ...tables.map((x) => x.number)) + 1);
   tables.push(t);
-  save('tables.json', tables);
+  try { await saveTables(); } catch (e) { return dbError(res, e); }
   res.json({ ok: true });
 });
 
 // Régénère le QR d'une table (invalide l'ancien)
-app.post('/api/admin/tables/:id/regenerate', requireAdmin, (req, res) => {
+app.post('/api/admin/tables/:id/regenerate', requireAdmin, async (req, res) => {
   const t = tables.find((x) => x.id === req.params.id);
   if (!t) return res.status(404).json({ error: 'Table introuvable' });
   t.token = crypto.randomBytes(9).toString('base64url');
-  save('tables.json', tables);
+  try { await saveTables(); } catch (e) { return dbError(res, e); }
   res.json({ ok: true });
 });
 
-app.delete('/api/admin/tables/:id', requireAdmin, (req, res) => {
+app.delete('/api/admin/tables/:id', requireAdmin, async (req, res) => {
   tables = tables.filter((x) => x.id !== req.params.id);
-  save('tables.json', tables);
+  try { await saveTables(); } catch (e) { return dbError(res, e); }
   res.json({ ok: true });
 });
 
 app.get('/api/admin/menu', requireAdmin, (_req, res) => res.json(menu));
 
-app.patch('/api/admin/menu/:id', requireAdmin, (req, res) => {
+app.patch('/api/admin/menu/:id', requireAdmin, async (req, res) => {
   const item = findItem(req.params.id);
   if (!item) return res.status(404).json({ error: 'Plat introuvable' });
   if (typeof req.body.available === 'boolean') item.available = req.body.available;
-  save('menu.json', menu);
+  try { await saveMenu(); } catch (e) { return dbError(res, e); }
   io.emit('menu:availability', { id: item.id, available: item.available });
   res.json(item);
 });
@@ -230,9 +238,13 @@ io.on('connection', (socket) => {
   else socket.disconnect(true);
 });
 
-server.listen(PORT, () => {
+loadData().then(() => server.listen(PORT, () => {
   console.log(`\n🍽  QR Resto démarré sur ${BASE_URL}`);
+  console.log(`   Stockage             : ${storage.kind}`);
   console.log(`   Interface restaurant : ${BASE_URL}/admin  (code PIN : ${process.env.ADMIN_PIN ? '••••' : ADMIN_PIN})`);
   console.log(`   Exemple table 1      : ${BASE_URL}/t/${tables[0]?.token}`);
   console.log('   Paiement             : au comptoir / auprès du serveur\n');
+})).catch((e) => {
+  console.error('Démarrage impossible :', e.message);
+  process.exit(1);
 });
