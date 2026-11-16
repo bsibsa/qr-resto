@@ -243,3 +243,11 @@ h1, h2 { font-family: Fraunces, serif; }
 .ed-allergens .ed-tag.al.on { background: rgba(232,106,106,.14); border-color: var(--danger); color: var(--text); }
 .ed-allergens .ed-tag.none.on { background: rgba(127,200,160,.15); border-color: var(--ready); color: var(--ready); }
 .al-missing { color: var(--accent); }
+
+/* ---------- Impression des bons ---------- */
+.print-bar { display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); font-size: 13px; }
+.pb-title { font-weight: 600; }
+.pb-auto, .pb-width { display: flex; align-items: center; gap: 8px; color: var(--muted); cursor: pointer; }
+.pb-width select { padding: 6px 8px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); color: var(--text); font: inherit; }
+.print-bar #testPrint { margin-left: auto; }
+.print-btn { white-space: nowrap; }

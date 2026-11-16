@@ -43,6 +43,14 @@
 
     <!-- Commandes -->
     <section class="view" id="view-orders">
+      <div class="print-bar">
+        <span class="pb-title">🖨 Bons de commande</span>
+        <label class="pb-auto"><button class="switch" id="autoPrint" role="switch" aria-checked="false" aria-label="Impression automatique"></button>Impression automatique des nouvelles commandes</label>
+        <label class="pb-width">Papier
+          <select id="paperWidth"><option value="80">80 mm</option><option value="58">58 mm</option><option value="210">Feuille A4</option></select>
+        </label>
+        <button class="btn sm ghost" id="testPrint">Imprimer un ticket test</button>
+      </div>
       <div class="stats" id="stats"></div>
       <div class="board">
         <div class="col" data-status="new"><h2><i class="d new"></i>Nouvelles <span></span></h2><div class="list"></div></div>

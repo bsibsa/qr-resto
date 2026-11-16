@@ -67,6 +67,18 @@ Les photos sont réduites dans le navigateur (1000 px, JPEG) puis stockées en b
 - Mentions légales (établissement, adresse, SIRET, responsable de la publication, hébergeur) et
   mention sur les prix se remplissent dans l'onglet Menu ; le client y accède en bas de la carte.
 
+## Bons de commande (impression)
+
+Onglet Commandes : bouton 🖨 sur chaque commande, ticket test, largeur du papier (58 mm, 80 mm, A4)
+et impression automatique des nouvelles commandes. Ces réglages sont propres à chaque appareil :
+activez l'impression automatique uniquement sur l'ordinateur relié à l'imprimante.
+
+Pour imprimer sans boîte de dialogue, lancez Chrome avec `--kiosk-printing` (l'imprimante à tickets
+doit être l'imprimante par défaut) :
+
+- Windows : raccourci vers `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing https://VOTRE-SITE/admin`
+- Mac : `open -na "Google Chrome" --args --kiosk-printing https://VOTRE-SITE/admin`
+
 ## Données
 
 Avec `DATABASE_URL`, le menu, les tables et 90 jours de commandes sont enregistrés dans PostgreSQL

@@ -76,6 +76,7 @@
     socket.on('order:new', (o) => {
       orders = orders.filter((x) => x.id !== o.id).concat(o);
       fresh.add(o.id);
+      if (autoPrint && !printed.has(o.id)) printOrder(o);
       renderOrders();
       chime();
       flashTitle(`🔔 Table ${o.tableNumber}`);
@@ -128,11 +129,98 @@
         <span class="pay ${o.paid ? 'ok' : 'due'}">${o.paid ? '✓ Encaissée' : '€ À encaisser'}</span>
         <span class="total">${fmt.format(o.total / 100)}</span>
         <span class="grow"></span>
+        <button class="btn sm ghost print-btn" data-print title="Imprimer le bon de commande">🖨${printed.has(o.id) ? ' Réimprimer' : ''}</button>
         ${!o.paid ? `<button class="btn sm ghost" data-act="paid">Encaissée</button>` : ''}
         ${next ? `<button class="btn sm next" data-act="${next[0]}">${next[1]}</button>` : ''}
       </div>
     </article>`;
   }
+
+  // ---------- Bons de commande (impression) ----------
+  // Réglages propres à chaque appareil : on active l'impression automatique uniquement
+  // sur l'ordinateur relié à l'imprimante.
+  let autoPrint = ls.get('autoPrint') === 'on';
+  let paperWidth = Number(ls.get('paperWidth')) || 80;
+  const printed = new Set((() => { try { return JSON.parse(ls.get('printed') || '[]'); } catch { return []; } })());
+  const rememberPrinted = (id) => { printed.add(id); ls.set('printed', JSON.stringify([...printed].slice(-300))); };
+
+  function ticketHtml(o, test) {
+    const d = new Date(o.createdAt);
+    const when = `${d.toLocaleDateString('fr-FR')} ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+    const count = o.items.reduce((s, l) => s + l.qty, 0);
+    const w = paperWidth, pad = w === 58 ? 2 : w === 80 ? 4 : 15, big = w === 58 ? 26 : 32;
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Bon ${o.number}</title><style>
+      @page { size: ${w === 210 ? 'A4' : `${w}mm auto`}; margin: 0; }
+      * { box-sizing: border-box; }
+      html, body { background: #fff; color: #000; }
+      body { margin: 0; width: ${w}mm; padding: 3mm ${pad}mm 8mm; font: ${w === 58 ? 12 : 13}px/1.35 "Courier New", Courier, monospace; }
+      .c { text-align: center; }
+      .resto { font-weight: 700; font-size: 1.1em; }
+      .kind { letter-spacing: .25em; font-size: .85em; margin-top: 1mm; }
+      .tbl { font-size: ${big}px; font-weight: 700; margin: 3mm 0 1mm; }
+      .meta { display: flex; justify-content: space-between; gap: 2mm; font-size: .92em; }
+      hr { border: 0; border-top: 1px dashed #000; margin: 2.5mm 0; }
+      .l { display: flex; gap: 2mm; font-size: 1.15em; font-weight: 700; margin: 1.6mm 0 0; }
+      .q { min-width: 9mm; }
+      .n { margin: .5mm 0 0 11mm; font-size: .95em; }
+      .note { border: 1.5px solid #000; padding: 2mm; margin-top: 3mm; font-weight: 700; }
+      .foot { font-size: .92em; }
+    </style></head><body>
+      <div class="c resto">${esc($('#brandName').textContent)}</div>
+      <div class="c kind">${test ? 'TICKET TEST' : 'BON DE COMMANDE'}</div>
+      <div class="c tbl">TABLE ${o.tableNumber}</div>
+      <div class="meta"><span>N° ${String(o.number).padStart(3, '0')}</span><span>${when}</span></div>
+      <hr>
+      ${o.items.map((l) => `<div class="l"><span class="q">${l.qty} x</span><span>${esc(l.name)}</span></div>${l.note ? `<div class="n">&gt; ${esc(l.note)}</div>` : ''}`).join('')}
+      ${o.note ? `<div class="note">NOTE : ${esc(o.note)}</div>` : ''}
+      <hr>
+      <div class="meta foot"><span>${count} article${count > 1 ? 's' : ''}</span><span>${o.paid ? 'ENCAISSÉE' : 'À ENCAISSER'}</span></div>
+    </body></html>`;
+  }
+
+  // Une impression à la fois (plusieurs commandes peuvent arriver ensemble)
+  let printQueue = Promise.resolve();
+  function printOrder(o, test) {
+    if (!test) rememberPrinted(o.id);
+    printQueue = printQueue.then(() => new Promise((done) => {
+      const frame = document.createElement('iframe');
+      frame.setAttribute('aria-hidden', 'true');
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+      let finished = false;
+      const finish = () => { if (finished) return; finished = true; setTimeout(() => { frame.remove(); done(); }, 300); };
+      frame.onload = () => {
+        const w = frame.contentWindow;
+        w.onafterprint = finish;
+        try { w.focus(); w.print(); } catch { toast("L'impression a échoué"); }
+        setTimeout(finish, 1500); // sans boîte de dialogue (Chrome en mode impression directe), print() rend la main tout de suite
+      };
+      frame.srcdoc = ticketHtml(o, test);
+      document.body.appendChild(frame);
+    }));
+  }
+
+  function applyPrintSettings() {
+    $('#autoPrint').classList.toggle('on', autoPrint);
+    $('#autoPrint').setAttribute('aria-checked', autoPrint);
+    $('#paperWidth').value = String(paperWidth);
+  }
+  applyPrintSettings();
+  $('#autoPrint').addEventListener('click', () => {
+    autoPrint = !autoPrint; ls.set('autoPrint', autoPrint ? 'on' : 'off'); applyPrintSettings();
+    toast(autoPrint ? 'Chaque nouvelle commande sera imprimée sur cet appareil' : 'Impression automatique désactivée sur cet appareil');
+  });
+  $('#paperWidth').addEventListener('change', (e) => { paperWidth = Number(e.target.value); ls.set('paperWidth', String(paperWidth)); });
+  $('#testPrint').addEventListener('click', () => printOrder({
+    id: 'test', number: 0, tableNumber: 12, createdAt: new Date().toISOString(), paid: false,
+    note: 'Ceci est un essai : vérifiez que le texte est net et entier.',
+    items: [{ qty: 2, name: 'Burger du Comptoir', note: 'sans oignons, bien cuit' }, { qty: 1, name: 'Limonade artisanale' }],
+  }, true));
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.order [data-print]');
+    if (!b) return;
+    const o = orders.find((x) => x.id === b.closest('.order').dataset.id);
+    if (o) { printOrder(o); b.textContent = '🖨 Réimprimer'; }
+  });
 
   function renderOrders() {
     const sorted = [...orders].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
