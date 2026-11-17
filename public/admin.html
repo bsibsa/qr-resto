@@ -29,6 +29,7 @@
         <button class="tab active" data-tab="orders">Commandes <span class="count" id="newCount" hidden>0</span></button>
         <button class="tab" data-tab="tables" data-manager>Tables & QR</button>
         <button class="tab" data-tab="menu" data-manager>Menu</button>
+        <button class="tab" data-tab="stats" data-manager>Statistiques</button>
         <button class="tab" data-tab="team" data-manager>Équipe</button>
       </nav>
       <div class="top-right">
@@ -86,6 +87,19 @@
         <button class="btn ghost" id="cancelEdit">Annuler</button>
         <button class="btn primary" id="saveMenu">Enregistrer</button>
       </div>
+    </section>
+
+    <!-- Statistiques -->
+    <section class="view" id="view-stats" hidden>
+      <div class="view-head">
+        <div><h2>Statistiques</h2><p>Calculées sur les commandes non annulées, à l'heure du restaurant. Historique conservé : 90 jours.</p></div>
+        <div class="seg" id="statsPeriod" role="group" aria-label="Période">
+          <button data-days="7" class="on" aria-pressed="true">7 jours</button>
+          <button data-days="30" aria-pressed="false">30 jours</button>
+          <button data-days="90" aria-pressed="false">90 jours</button>
+        </div>
+      </div>
+      <div id="statsBody"></div>
     </section>
 
     <!-- Équipe -->

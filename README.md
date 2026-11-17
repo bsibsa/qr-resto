@@ -30,6 +30,7 @@ Au premier lancement, 12 tables sont créées avec un lien secret chacune, et la
 | `PORT` | Port HTTP (3000 par défaut) |
 | `BASE_URL` | URL publique du site, encodée dans les QR codes (ex. `https://menu.mon-resto.fr`) |
 | `TABLE_SECRET` | Rend les liens des tables stables même si les fichiers sont effacés (recommandé en ligne) |
+| `TIMEZONE` | Fuseau horaire des statistiques (par défaut `Europe/Paris`) |
 | `ADMIN_PIN` | Code PIN de l'interface restaurant |
 
 ## Fonctionnalités
@@ -66,6 +67,12 @@ Les photos sont réduites dans le navigateur (1000 px, JPEG) puis stockées en b
   affiche « Non renseignés : demandez au personnel ».
 - Mentions légales (établissement, adresse, SIRET, responsable de la publication, hébergeur) et
   mention sur les prix se remplissent dans l'onglet Menu ; le client y accède en bas de la carte.
+
+## Statistiques
+
+Onglet **Statistiques** (gérant), sur 7, 30 ou 90 jours : chiffre d'affaires, commandes, panier moyen,
+articles vendus (avec l'évolution par rapport à la période précédente), chiffre par jour, plats les plus
+vendus et heures de pointe. Les jours et les heures suivent le fuseau `TIMEZONE` (par défaut `Europe/Paris`).
 
 ## Bons de commande (impression)
 

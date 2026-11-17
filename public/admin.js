@@ -269,6 +269,7 @@
     if (name === 'tables') loadTables();
     if (name === 'menu') loadMenu();
     if (name === 'team') loadTeam();
+    if (name === 'stats') loadStats();
   }
   $('.tabs').addEventListener('click', (e) => {
     const t = e.target.closest('.tab');
@@ -278,6 +279,124 @@
     if (dirty) { toast('Enregistrez ou annulez vos modifications de la carte avant de vous déconnecter'); return showTab('menu'); }
     logout();
   });
+
+  // ---------- Statistiques ----------
+  let statsDays = 7, stats = null;
+  const euro = (c) => fmt.format(c / 100);
+  const euroShort = (c) => (c >= 100000 ? `${Math.round(c / 100000 * 10) / 10} k€` : `${Math.round(c / 100)} €`);
+  const dayLabel = (iso, long) => {
+    const t = new Date(iso + 'T12:00:00').toLocaleDateString('fr-FR', long ? { weekday: 'long', day: 'numeric', month: 'long' } : { day: 'numeric', month: 'short' });
+    return t.charAt(0).toUpperCase() + t.slice(1); // « Lundi 16 novembre » : seule la première lettre en majuscule
+  };
+
+  async function loadStats() {
+    $('#statsBody').innerHTML = '<div class="empty">Calcul en cours…</div>';
+    const r = await api('/api/admin/stats?days=' + statsDays);
+    if (r.error) { $('#statsBody').innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
+    stats = r; renderStats();
+  }
+  $('#statsPeriod').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-days]'); if (!b) return;
+    statsDays = Number(b.dataset.days);
+    $('#statsPeriod').querySelectorAll('button').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
+    loadStats();
+  });
+
+  function delta(cur, prev) {
+    if (!stats.previous) return '<small class="dl">Pas de période précédente comparable</small>';
+    if (!prev) return cur ? '<small class="dl">Nouveau sur la période</small>' : '<small class="dl">Comme la période précédente</small>';
+    const pct = Math.round((cur - prev) / prev * 100);
+    if (pct === 0) return '<small class="dl">= stable</small>';
+    return `<small class="dl ${pct > 0 ? 'up' : 'down'}">${pct > 0 ? '▲ +' : '▼ '}${pct} % <span>vs ${stats.days} jours précédents</span></small>`;
+  }
+
+  function renderStats() {
+    const t = stats.totals, p = stats.previous || {};
+    if (!t.orders) {
+      $('#statsBody').innerHTML = `<div class="ed-card empty-stats"><b>Pas encore de commande sur les ${stats.days} derniers jours.</b><p>Les statistiques se rempliront dès les premières commandes.</p></div>`;
+      return;
+    }
+    const top = stats.topItems, maxQty = Math.max(...top.map((i) => i.qty));
+    const hours = stats.byHour.filter((h) => h.orders);
+    const hFrom = Math.min(...hours.map((h) => h.hour)), hTo = Math.max(...hours.map((h) => h.hour));
+    $('#statsBody').innerHTML = `
+      <div class="stats kpis">
+        <div class="stat"><small>Chiffre d'affaires</small><b>${euro(t.revenue)}</b>${delta(t.revenue, p.revenue)}</div>
+        <div class="stat"><small>Commandes</small><b>${t.orders}</b>${delta(t.orders, p.orders)}</div>
+        <div class="stat"><small>Panier moyen</small><b>${euro(t.average)}</b>${delta(t.average, p.average)}</div>
+        <div class="stat"><small>Articles vendus</small><b>${t.items}</b>${delta(t.items, p.items)}</div>
+      </div>
+      <div class="chart-grid">
+        <section class="chart-card wide">
+          <h3>Chiffre d'affaires par jour</h3>
+          <div class="chart" id="chartDays"></div>
+          <details class="chart-table"><summary>Voir les chiffres</summary>
+            <table><thead><tr><th>Jour</th><th>Commandes</th><th>Chiffre</th></tr></thead><tbody>
+            ${[...stats.byDay].reverse().map((d) => `<tr><td>${dayLabel(d.date, true)}</td><td>${d.orders}</td><td>${euro(d.revenue)}</td></tr>`).join('')}
+            </tbody></table></details>
+        </section>
+        <section class="chart-card">
+          <h3>Plats les plus vendus</h3>
+          <ol class="top-items">${top.map((i) => `
+            <li><span class="ti-name">${esc(i.emoji || '')} ${esc(i.name)}</span>
+              <span class="ti-bar"><i style="width:${Math.max(4, i.qty / maxQty * 100)}%"></i></span>
+              <span class="ti-qty">${i.qty}</span><span class="ti-rev">${euro(i.revenue)}</span></li>`).join('')}</ol>
+        </section>
+        <section class="chart-card">
+          <h3>Heures de pointe <small>commandes par heure</small></h3>
+          <div class="chart" id="chartHours"></div>
+        </section>
+      </div>`;
+    drawBars($('#chartDays'), stats.byDay, {
+      value: (d) => d.revenue, label: (d) => dayLabel(d.date), axis: euroShort,
+      tip: (d) => `<b>${dayLabel(d.date, true)}</b><span>${euro(d.revenue)}</span><span>${d.orders} commande${d.orders > 1 ? 's' : ''}</span>`,
+    });
+    drawBars($('#chartHours'), stats.byHour.slice(Math.max(0, hFrom - 1), Math.min(24, hTo + 2)), {
+      value: (h) => h.orders, label: (h) => `${h.hour}h`, axis: (v) => String(v), integer: true,
+      tip: (h) => `<b>${h.hour}h – ${h.hour + 1}h</b><span>${h.orders} commande${h.orders > 1 ? 's' : ''}</span>`,
+    });
+  }
+
+  // Histogramme SVG simple : barres fines arrondies en haut, grille discrète, infobulle au survol
+  function niceStep(max, ticks, integer) {
+    const raw = max / ticks, mag = 10 ** Math.floor(Math.log10(raw || 1));
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || 10 * mag;
+    return integer ? Math.max(1, Math.ceil(step)) : step;
+  }
+  function drawBars(el, data, o) {
+    const W = el.clientWidth || 600, H = 220, m = { t: 12, r: 8, b: 26, l: 52 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const max = Math.max(...data.map(o.value), 0);
+    const step = niceStep(max || 1, 4, o.integer), top = Math.max(step, Math.ceil(max / step) * step);
+    const y = (v) => m.t + ih - (v / top) * ih;
+    const band = iw / data.length, bw = Math.max(2, Math.min(28, band - 2));
+    const every = Math.ceil(data.length / Math.max(1, Math.floor(iw / 56)));
+    let grid = '';
+    for (let v = 0; v <= top + 1e-9; v += step) {
+      grid += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" class="${v ? 'gl' : 'base'}"/><text x="${m.l - 8}" y="${y(v) + 4}" class="ax" text-anchor="end">${esc(o.axis(v))}</text>`;
+    }
+    const bars = data.map((d, i) => {
+      const v = o.value(d), x = m.l + i * band + (band - bw) / 2, h = y(0) - y(v), r = Math.min(4, bw / 2, h);
+      const path = v ? `M${x},${y(0)} V${y(v) + r} Q${x},${y(v)} ${x + r},${y(v)} H${x + bw - r} Q${x + bw},${y(v)} ${x + bw},${y(v) + r} V${y(0)} Z` : '';
+      const lbl = i % every === 0 ? `<text x="${x + bw / 2}" y="${H - 8}" class="ax" text-anchor="middle">${esc(o.label(d))}</text>` : '';
+      return `<g class="bar" data-i="${i}">${path ? `<path d="${path}" class="bf"/>` : ''}<rect x="${m.l + i * band}" y="${m.t}" width="${band}" height="${ih}" class="hit"/>${lbl}</g>`;
+    }).join('');
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Histogramme">${grid}${bars}</svg><div class="tip" hidden></div>`;
+    const tip = el.querySelector('.tip'), svg = el.querySelector('svg');
+    el.querySelectorAll('.bar').forEach((g) => {
+      g.addEventListener('mouseenter', () => {
+        const d = data[g.dataset.i];
+        svg.classList.add('hovering'); g.classList.add('on');
+        tip.innerHTML = o.tip(d); tip.hidden = false;
+        const i = Number(g.dataset.i), cx = m.l + i * band + band / 2;
+        tip.style.left = Math.min(Math.max(cx - tip.offsetWidth / 2, 0), W - tip.offsetWidth) + 'px';
+        tip.style.top = Math.max(0, y(o.value(d)) - tip.offsetHeight - 10) + 'px';
+      });
+      g.addEventListener('mouseleave', () => { svg.classList.remove('hovering'); g.classList.remove('on'); tip.hidden = true; });
+    });
+  }
+  let resizeTimer;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (stats && !$('#view-stats').hidden) renderStats(); }, 200); });
 
   // ---------- Équipe ----------
   let team = [];

@@ -62,6 +62,14 @@ function nextOrderNumber() {
 
 // ---------- App ----------
 const app = express();
+// Express 4 ne rattrape pas les erreurs des routes asynchrones : on les transmet au gestionnaire d'erreurs
+for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+  const original = app[method].bind(app);
+  app[method] = (path, ...handlers) => (handlers.length === 0 ? original(path) : original(path, ...handlers.map((h) =>
+    (typeof h === 'function' && h.length < 4 ? (req, res, next) => {
+      try { const r = h(req, res, next); if (r && typeof r.catch === 'function') r.catch(next); } catch (e) { next(e); }
+    } : h))));
+}
 const server = http.createServer(app);
 const io = new Server(server);
 
@@ -430,6 +438,61 @@ app.patch('/api/admin/menu/:id', requireManager, async (req, res) => {
   res.json(item);
 });
 
+// ---------- Statistiques (gérant) ----------
+const TIMEZONE = process.env.TIMEZONE || 'Europe/Paris';
+const dayFmt = new Intl.DateTimeFormat('fr-CA', { timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, hour: 'numeric', hourCycle: 'h23' });
+const localHour = (d) => Number(hourFmt.formatToParts(d).find((p) => p.type === 'hour').value) % 24;
+const localDay = (d) => dayFmt.format(d); // AAAA-MM-JJ à l'heure du restaurant
+
+function summarize(list) {
+  const revenue = list.reduce((s, o) => s + o.total, 0);
+  const items = list.reduce((s, o) => s + o.items.reduce((n, l) => n + l.qty, 0), 0);
+  return { revenue, orders: list.length, items, average: list.length ? Math.round(revenue / list.length) : 0 };
+}
+
+app.get('/api/admin/stats', requireManager, async (req, res) => {
+  const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
+  let all;
+  try { all = await storage.recentOrders((days * 2 + 1) * 24); }
+  catch (e) { console.error('[db] statistiques :', e.message); return res.status(503).json({ error: 'Statistiques indisponibles pour le moment' }); }
+  all = all.filter((o) => o.status !== 'cancelled');
+
+  // Période : les N derniers jours, aujourd'hui compris (jours calendaires du restaurant)
+  const dayList = [];
+  for (let i = days - 1; i >= 0; i--) dayList.push(localDay(new Date(Date.now() - i * 86400e3)));
+  const inPeriod = new Set(dayList);
+  const prevDays = new Set();
+  for (let i = 2 * days - 1; i >= days; i--) prevDays.add(localDay(new Date(Date.now() - i * 86400e3)));
+
+  const current = all.filter((o) => inPeriod.has(localDay(new Date(o.createdAt))));
+  const previous = all.filter((o) => prevDays.has(localDay(new Date(o.createdAt))));
+
+  const byDay = new Map(dayList.map((d) => [d, { date: d, revenue: 0, orders: 0 }]));
+  const byHour = Array.from({ length: 24 }, (_, h) => ({ hour: h, orders: 0 }));
+  const byItem = new Map();
+  for (const o of current) {
+    const d = new Date(o.createdAt);
+    const day = byDay.get(localDay(d));
+    day.revenue += o.total; day.orders += 1;
+    byHour[localHour(d)].orders += 1;
+    for (const l of o.items) {
+      const it = byItem.get(l.id) || { id: l.id, name: l.name, emoji: l.emoji, qty: 0, revenue: 0 };
+      it.qty += l.qty; it.revenue += l.price * l.qty; it.name = l.name;
+      byItem.set(l.id, it);
+    }
+  }
+  res.json({
+    days,
+    // la période précédente n'est comparable que si elle est entièrement conservée (90 jours d'historique)
+    totals: summarize(current),
+    previous: 2 * days <= 90 ? summarize(previous) : null,
+    byDay: [...byDay.values()],
+    byHour,
+    topItems: [...byItem.values()].sort((a, b) => b.qty - a.qty || b.revenue - a.revenue).slice(0, 10),
+  });
+});
+
 // ---------- Temps réel ----------
 io.on('connection', (socket) => {
   const { role, token } = socket.handshake.auth || {};
@@ -437,6 +500,13 @@ io.on('connection', (socket) => {
   if (s) { socket.data.staffId = s.staffId; socket.join('staff'); }
   else if (role === 'table' && tableByToken(token)) socket.join('table:' + token);
   else socket.disconnect(true);
+});
+
+// Filet de sécurité : une erreur imprévue est notée dans les logs sans arrêter le site
+process.on('unhandledRejection', (e) => console.error('[erreur]', e?.stack || e));
+app.use((err, _req, res, _next) => {
+  console.error('[erreur]', err?.stack || err);
+  if (!res.headersSent) res.status(500).json({ error: 'Erreur inattendue, réessayez' });
 });
 
 loadData().then(() => server.listen(PORT, () => {
